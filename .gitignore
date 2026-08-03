@@ -1,0 +1,42 @@
+# Backend env (secrets)
+backend/.env
+.env
+.env.*
+
+# Python
+backend/venv
+.venv
+.venv_*
+**/.venv*/
+__pycache__
+*.pyc
+.pytest_cache
+*.egg-info
+
+# Node / frontend build
+frontend/node_modules
+frontend/dist
+node_modules
+dist
+
+# Logs
+*.log
+backend/logs
+
+# Axon code intelligence graph (local index)
+.axon/
+
+# OS / editor
+.DS_Store
+.idea
+.vscode
+
+# Archives / local bundles
+*.zip
+
+# Cursor / local tooling
+.cursor/
+agent-transcripts/
+
+# Stray local copies
+backend/Users/
