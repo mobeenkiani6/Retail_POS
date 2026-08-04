@@ -11,6 +11,8 @@ import { formatCurrency } from '../utils/formatCurrency';
 import { showToast } from '../components/Toast';
 import { showConfirm } from '../components/ConfirmDialog';
 import { formatSkuLabel, type ProductSku } from '../utils/productSkus';
+import { getBranchId } from '../branch';
+import { useGrnStore, type GrnProductBlock, type GrnSkuLine } from '../stores/grnStore';
 
 type GRNItem = {
   id?: number;
@@ -44,22 +46,7 @@ type Product = {
 
 type Supplier = { id: number; name: string };
 
-type SkuLine = {
-  sku_id: number;
-  label: string;
-  selected: boolean;
-  quantity: number;
-  cost_price: number;
-  sell_price: number;
-};
-
-type ProductBlock = {
-  product_id: number;
-  expanded: boolean;
-  skus: SkuLine[];
-};
-
-function skusFromProduct(p: Product): SkuLine[] {
+function skusFromProduct(p: Product): GrnSkuLine[] {
   return (p.skus || []).map(s => ({
     sku_id: s.id!,
     label: s.display_label || formatSkuLabel(s),
@@ -70,7 +57,7 @@ function skusFromProduct(p: Product): SkuLine[] {
   }));
 }
 
-function blocksFromItems(items: GRNItem[], products: Product[]): ProductBlock[] {
+function blocksFromItems(items: GRNItem[], products: Product[]): GrnProductBlock[] {
   const byProduct = new Map<number, GRNItem[]>();
   for (const item of items) {
     if (!item.product_id) continue;
@@ -100,7 +87,7 @@ function blocksFromItems(items: GRNItem[], products: Product[]): ProductBlock[] 
   });
 }
 
-function itemsFromBlocks(blocks: ProductBlock[]): GRNItem[] {
+function itemsFromBlocks(blocks: GrnProductBlock[]): GRNItem[] {
   const out: GRNItem[] = [];
   for (const block of blocks) {
     for (const sku of block.skus) {
@@ -122,14 +109,25 @@ export default function GRNPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<GRN | null>(null);
-  const [supplierId, setSupplierId] = useState('');
-  const [notes, setNotes] = useState('');
-  const [blocks, setBlocks] = useState<ProductBlock[]>([]);
-  const [pickerProductId, setPickerProductId] = useState('');
 
-  const branchId = localStorage.getItem('active_branch_id') || '1';
+  const {
+    modalOpen,
+    editing,
+    supplierId,
+    notes,
+    blocks,
+    pickerProductId,
+    setSupplierId,
+    setNotes,
+    setBlocks,
+    setPickerProductId,
+    openCreate,
+    openEdit: storeOpenEdit,
+    closeModal,
+    clearDraft,
+  } = useGrnStore();
+
+  const branchId = getBranchId();
 
   const load = async () => {
     setLoading(true);
@@ -149,22 +147,17 @@ export default function GRNPage() {
 
   useEffect(() => { load(); }, []);
 
-  const openCreate = () => {
-    setEditing(null);
-    setSupplierId('');
-    setNotes('');
-    setBlocks([]);
-    setPickerProductId('');
-    setModalOpen(true);
-  };
-
   const openEdit = (grn: GRN) => {
-    setEditing(grn);
-    setSupplierId(grn.supplier_id ? String(grn.supplier_id) : '');
-    setNotes(grn.notes || '');
-    setBlocks(blocksFromItems(grn.items, products));
-    setPickerProductId('');
-    setModalOpen(true);
+    storeOpenEdit(
+      {
+        id: grn.id,
+        grn_number: grn.grn_number,
+        supplier_id: grn.supplier_id,
+        notes: grn.notes,
+        status: grn.status,
+      },
+      blocksFromItems(grn.items, products),
+    );
   };
 
   const addProductBlock = () => {
@@ -203,7 +196,7 @@ export default function GRNPage() {
     }));
   };
 
-  const updateSkuField = (productId: number, skuId: number, field: keyof SkuLine, value: string | number | boolean) => {
+  const updateSkuField = (productId: number, skuId: number, field: keyof GrnSkuLine, value: string | number | boolean) => {
     setBlocks(prev => prev.map(b => {
       if (b.product_id !== productId) return b;
       return {
@@ -228,7 +221,7 @@ export default function GRNPage() {
     if (!validItems.length) { showToast('Select at least one variant to receive', 'error'); return; }
     try {
       const payload = {
-        branch_id: parseInt(branchId, 10),
+        branch_id: branchId,
         supplier_id: supplierId ? parseInt(supplierId, 10) : null,
         notes,
         items: validItems,
@@ -240,7 +233,7 @@ export default function GRNPage() {
         await post('/v1/grn/', payload);
         showToast('Purchase order created', 'success');
       }
-      setModalOpen(false);
+      clearDraft();
       load();
     } catch (e) {
       showToast(getUserMessage(e), 'error');
@@ -253,6 +246,7 @@ export default function GRNPage() {
     try {
       await post(`/v1/grn/${id}/receive`, {});
       showToast('Stock received successfully', 'success');
+      if (editing?.id === id) clearDraft();
       load();
     } catch (e) {
       showToast(getUserMessage(e), 'error');
@@ -278,6 +272,7 @@ export default function GRNPage() {
     if (!ok) return;
     await del(`/v1/grn/${id}`);
     showToast('Deleted', 'success');
+    if (editing?.id === id) clearDraft();
     load();
   };
 
@@ -321,10 +316,10 @@ export default function GRNPage() {
 
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={closeModal}
         title={editing ? `Edit ${editing.grn_number}` : 'New Purchase Receiving'}
         size="2xl"
-        footer={<><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button><Button onClick={handleSave}>{editing ? 'Save Changes' : 'Create Draft'}</Button></>}
+        footer={<><Button variant="secondary" onClick={closeModal}>Cancel</Button><Button onClick={handleSave}>{editing ? 'Save Changes' : 'Create Draft'}</Button></>}
       >
         <div className="space-y-5">
           <div className="grid sm:grid-cols-2 gap-4">

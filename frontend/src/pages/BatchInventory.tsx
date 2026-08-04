@@ -10,6 +10,7 @@ import { formatCurrency } from '../utils/formatCurrency';
 import { showToast } from '../components/Toast';
 import { getUserMessage } from '../api';
 import { TableSkeleton } from '../components/ui/Skeleton';
+import { getBranchId } from '../branch';
 
 type Batch = {
   id: number; batch_number: string; quantity: number;
@@ -39,7 +40,7 @@ export default function BatchInventory() {
   const [adjustModal, setAdjustModal] = useState<{ batch: Batch; productName: string } | null>(null);
   const [adjustForm, setAdjustForm] = useState({ quantity_delta: '', movement_type: 'adjustment', reason: '' });
 
-  const branchId = localStorage.getItem('active_branch_id') || '1';
+  const branchId = getBranchId();
 
   const load = () => {
     setLoading(true);

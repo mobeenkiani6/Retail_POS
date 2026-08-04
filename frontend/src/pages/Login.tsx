@@ -7,10 +7,11 @@ import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import log from '../utils/logger';
 import { post, getUserMessage } from '../api';
+import { setActiveBranchId } from '../branch';
 
 type LoginResponse = {
   token: string;
-  user: { id: number; username: string; role: string; branch_id?: number; branch_name?: string };
+  user: { id: number; username: string; role: string; branch_id?: string; branch_name?: string };
 };
 
 export default function Login() {
@@ -27,7 +28,10 @@ export default function Login() {
       log.info('Login', 'Attempting login', { username: formData.username });
       const data = await post<LoginResponse>('/auth/login', formData);
       if (data?.token) localStorage.setItem('auth_token', data.token);
-      if (data?.user) localStorage.setItem('user', JSON.stringify(data.user));
+      if (data?.user) {
+        localStorage.setItem('user', JSON.stringify(data.user));
+        setActiveBranchId(data.user.branch_id);
+      }
       navigate('/operations');
     } catch (err) {
       setError(getUserMessage(err));

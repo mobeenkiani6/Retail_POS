@@ -8,7 +8,8 @@ db = SQLAlchemy()
 
 class Branch(db.Model):
     __tablename__ = 'branches'
-    id = db.Column(db.Integer, primary_key=True)
+    # Hex string (32 chars) — shared with the admin panel for this POS instance
+    id = db.Column(db.String(36), primary_key=True, default=lambda: uuid.uuid4().hex)
     name = db.Column(db.String(255), nullable=False)
     address = db.Column(db.Text)
     phone = db.Column(db.String(50))
@@ -25,7 +26,7 @@ class Branch(db.Model):
 class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey('branches.id'), nullable=True)
+    branch_id = db.Column(db.String(36), db.ForeignKey('branches.id'), nullable=True)
     username = db.Column(db.String(100), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     pin_hash = db.Column(db.String(255))
@@ -41,7 +42,7 @@ class User(db.Model):
 class Setting(db.Model):
     __tablename__ = 'settings'
     id = db.Column(db.Integer, primary_key=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey('branches.id'), unique=True, nullable=True)
+    branch_id = db.Column(db.String(36), db.ForeignKey('branches.id'), unique=True, nullable=True)
     config = db.Column(db.JSON, nullable=False, default={})
 
 
@@ -190,7 +191,7 @@ class ProductSku(db.Model):
 class Inventory(db.Model):
     __tablename__ = 'inventory'
     id = db.Column(db.Integer, primary_key=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey('branches.id'), nullable=False)
+    branch_id = db.Column(db.String(36), db.ForeignKey('branches.id'), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
     sku_id = db.Column(db.Integer, db.ForeignKey('product_skus.id'), nullable=True)
     variant = db.Column(db.String(100), nullable=False, default='')
@@ -207,7 +208,7 @@ class Inventory(db.Model):
 class InventoryTransaction(db.Model):
     __tablename__ = 'inventory_transactions'
     id = db.Column(db.Integer, primary_key=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey('branches.id'), nullable=False)
+    branch_id = db.Column(db.String(36), db.ForeignKey('branches.id'), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
     sku_id = db.Column(db.Integer, db.ForeignKey('product_skus.id'), nullable=True)
     variant = db.Column(db.String(100), nullable=False, default='')
@@ -226,7 +227,7 @@ class ProductBatch(db.Model):
     __tablename__ = 'product_batches'
     id = db.Column(db.Integer, primary_key=True)
     product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
-    branch_id = db.Column(db.Integer, db.ForeignKey('branches.id'), nullable=False)
+    branch_id = db.Column(db.String(36), db.ForeignKey('branches.id'), nullable=False)
     batch_number = db.Column(db.String(100), nullable=False)
     quantity = db.Column(db.Integer, default=0)
     cost_price = db.Column(db.Numeric(12, 2), nullable=False, default=0)
@@ -263,7 +264,7 @@ class BatchMovement(db.Model):
 class GoodsReceivedNote(db.Model):
     __tablename__ = 'goods_received_notes'
     id = db.Column(db.Integer, primary_key=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey('branches.id'), nullable=False)
+    branch_id = db.Column(db.String(36), db.ForeignKey('branches.id'), nullable=False)
     supplier_id = db.Column(db.Integer, db.ForeignKey('suppliers.id'), nullable=True)
     grn_number = db.Column(db.String(50), unique=True, nullable=False)
     status = db.Column(db.String(30), default='draft')  # draft, received, cancelled
@@ -300,7 +301,7 @@ class Sale(db.Model):
     )
     id = db.Column(db.Integer, primary_key=True)
     invoice_uuid = db.Column(db.String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
-    branch_id = db.Column(db.Integer, db.ForeignKey('branches.id'), nullable=False)
+    branch_id = db.Column(db.String(36), db.ForeignKey('branches.id'), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     terminal_id = db.Column(db.String(64), nullable=True)
     total_amount = db.Column(db.Numeric(12, 2), nullable=False)
@@ -402,7 +403,7 @@ class Shift(db.Model):
     __tablename__ = 'shifts'
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    branch_id = db.Column(db.Integer, db.ForeignKey('branches.id'), nullable=False)
+    branch_id = db.Column(db.String(36), db.ForeignKey('branches.id'), nullable=False)
     opened_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
     closed_at = db.Column(db.DateTime(timezone=True), nullable=True)
     opening_cash = db.Column(db.Numeric(12, 2), default=0)
@@ -423,7 +424,7 @@ class AuditLog(db.Model):
 class Notification(db.Model):
     __tablename__ = 'notifications'
     id = db.Column(db.Integer, primary_key=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey('branches.id'), nullable=True)
+    branch_id = db.Column(db.String(36), db.ForeignKey('branches.id'), nullable=True)
     title = db.Column(db.String(255), nullable=False)
     message = db.Column(db.Text)
     severity = db.Column(db.String(20), default='info')

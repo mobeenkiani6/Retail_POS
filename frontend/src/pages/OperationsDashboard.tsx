@@ -11,6 +11,7 @@ import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import { get, getUserMessage } from '../api';
 import { formatCurrency } from '../utils/formatCurrency';
+import { getBranchId } from '../branch';
 
 type DashboardData = {
   today_sales_count: number;
@@ -40,7 +41,7 @@ export default function OperationsDashboard() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const branchId = localStorage.getItem('active_branch_id') || '1';
+    const branchId = getBranchId();
     get<DashboardData>(`/v1/dashboard/operations?branch_id=${branchId}`)
       .then(setData)
       .catch(e => setError(getUserMessage(e)))

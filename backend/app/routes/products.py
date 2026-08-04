@@ -8,6 +8,7 @@ from app.services.sku_service import (
 )
 from app.utils.auth_decorators import token_required, owner_required, role_required
 from app.errors import error_response
+from app.branch_scope import resolve_branch_id, require_branch_id
 
 products_bp = Blueprint('products', __name__)
 
@@ -152,11 +153,7 @@ def get_products(current_user):
     category_id = request.args.get('category_id')
     brand_id = request.args.get('brand_id')
     search = request.args.get('search', '').strip()
-    branch_id = request.args.get('branch_id', type=int)
-    if current_user.role != 'owner':
-        branch_id = current_user.branch_id
-    elif not branch_id:
-        branch_id = current_user.branch_id or 1
+    branch_id = resolve_branch_id(current_user, request.args.get('branch_id')) or require_branch_id(current_user)
 
     query = Product.query
     if not include_archived:
@@ -209,7 +206,7 @@ def create_product(current_user):
     err_resp, parsed = _parse_parent_payload(data)
     if err_resp:
         return err_resp
-    branch_id = data.get('branch_id') or current_user.branch_id or 1
+    branch_id = resolve_branch_id(current_user, data.get('branch_id')) or require_branch_id(current_user)
     product = Product(name=parsed['name'], status='active')
     _apply_parent_fields(product, parsed)
     db.session.add(product)
@@ -230,7 +227,7 @@ def create_product(current_user):
 @token_required
 def get_product(current_user, product_id):
     product = Product.query.get_or_404(product_id)
-    branch_id = request.args.get('branch_id', type=int) or current_user.branch_id or 1
+    branch_id = resolve_branch_id(current_user, request.args.get('branch_id')) or require_branch_id(current_user)
     return jsonify({'product': _product_to_dict(product, branch_id)}), 200
 
 
@@ -245,7 +242,7 @@ def update_product(current_user, product_id):
     if err_resp:
         return err_resp
     _apply_parent_fields(product, parsed)
-    branch_id = data.get('branch_id') or current_user.branch_id or 1
+    branch_id = resolve_branch_id(current_user, data.get('branch_id')) or require_branch_id(current_user)
     try:
         if 'skus' in data:
             incoming_ids = {int(s['id']) for s in data['skus'] if s.get('id')}
@@ -265,7 +262,7 @@ def update_product(current_user, product_id):
 @token_required
 def list_skus(current_user, product_id):
     product = Product.query.get_or_404(product_id)
-    branch_id = request.args.get('branch_id', type=int) or current_user.branch_id or 1
+    branch_id = resolve_branch_id(current_user, request.args.get('branch_id')) or require_branch_id(current_user)
     skus = [s for s in (product.skus or []) if not s.archived_at]
     skus.sort(key=lambda s: (s.sort_order or 0, s.id))
     return jsonify({'skus': [sku_to_dict(s, branch_id) for s in skus]}), 200
@@ -288,7 +285,7 @@ def add_sku(current_user, product_id):
         sku.sku_code = generate_sku_code(product.name, product.id)
     db.session.add(sku)
     db.session.flush()
-    branch_id = data.get('branch_id') or current_user.branch_id or 1
+    branch_id = resolve_branch_id(current_user, data.get('branch_id')) or require_branch_id(current_user)
     initial = parsed.get('initial_stock', 0)
     if initial > 0:
         restock_sku(branch_id, sku.id, initial, reason='stock_in', user_id=current_user.id, notes='Initial stock')
@@ -313,7 +310,7 @@ def update_sku(current_user, product_id, sku_id):
         return error_response('Conflict', 'Barcode already in use', 409)
     apply_sku_fields(sku, parsed)
     db.session.commit()
-    branch_id = data.get('branch_id') or current_user.branch_id or 1
+    branch_id = resolve_branch_id(current_user, data.get('branch_id')) or require_branch_id(current_user)
     return jsonify({'sku': sku_to_dict(sku, branch_id)}), 200
 
 
@@ -357,7 +354,7 @@ def duplicate_sku(current_user, product_id, sku_id):
     )
     db.session.add(dup)
     db.session.commit()
-    branch_id = current_user.branch_id or 1
+    branch_id = resolve_branch_id(current_user) or require_branch_id(current_user)
     return jsonify({'sku': sku_to_dict(dup, branch_id)}), 201
 
 
@@ -415,11 +412,53 @@ def duplicate_product(current_user, product_id):
     return jsonify({'product': _product_to_dict(dup)}), 201
 
 
-@products_bp.route('/<int:product_id>', methods=['DELETE'])
+@products_bp.route('/<int:product_id>/archive', methods=['PATCH'])
 @token_required
-@owner_required
+@role_required('owner', 'manager', 'inventory_manager')
 def archive_product(current_user, product_id):
     product = Product.query.get_or_404(product_id)
     product.archived_at = datetime.utcnow()
+    for sku in product.skus or []:
+        if not sku.archived_at:
+            sku.archived_at = datetime.utcnow()
     db.session.commit()
     return jsonify({'message': 'Product archived', 'product': _product_to_dict(product)}), 200
+
+
+@products_bp.route('/<int:product_id>', methods=['DELETE'])
+@token_required
+@owner_required
+def delete_product(current_user, product_id):
+    """Permanently delete a product and its stock rows. Sale lines keep history with null product_id."""
+    from app.models import (
+        Inventory, InventoryTransaction, ProductBatch, BatchMovement, GRNItem, SaleItem,
+    )
+
+    product = Product.query.get_or_404(product_id)
+
+    grn_count = GRNItem.query.filter_by(product_id=product_id).count()
+    if grn_count:
+        return error_response(
+            'Conflict',
+            f'Cannot delete — product is used on {grn_count} receiving note line(s). Archive it instead.',
+            409,
+        )
+
+    try:
+        SaleItem.query.filter_by(product_id=product_id).update({'product_id': None, 'sku_id': None})
+
+        batch_ids = [b.id for b in ProductBatch.query.filter_by(product_id=product_id).all()]
+        if batch_ids:
+            BatchMovement.query.filter(BatchMovement.batch_id.in_(batch_ids)).delete(synchronize_session=False)
+            ProductBatch.query.filter_by(product_id=product_id).delete(synchronize_session=False)
+
+        InventoryTransaction.query.filter_by(product_id=product_id).delete(synchronize_session=False)
+        Inventory.query.filter_by(product_id=product_id).delete(synchronize_session=False)
+
+        ProductSku.query.filter_by(product_id=product_id).delete(synchronize_session=False)
+        db.session.delete(product)
+        db.session.commit()
+        return jsonify({'message': 'Product deleted permanently'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return error_response('Error', f'Could not delete product: {e}', 500)

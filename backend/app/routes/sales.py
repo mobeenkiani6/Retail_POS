@@ -8,6 +8,7 @@ from app.utils.auth_decorators import token_required, owner_required
 from app.services.stock_service import deduct_stock, get_stock_level, get_sku_stock_level
 from app.services.sync_service import enqueue_sale
 from app.errors import error_response
+from app.branch_scope import resolve_branch_id, require_branch_id
 
 sales_bp = Blueprint('sales', __name__)
 
@@ -23,14 +24,10 @@ def checkout(current_user):
     if not items:
         return error_response("Bad Request", "Cart is empty", 400)
 
-    branch_id = data.get('branch_id')
-    if current_user.role != 'owner':
-        branch_id = current_user.branch_id
-    elif not branch_id:
-        branch_id = current_user.branch_id or 1
-
-    if not branch_id:
-        return error_response("Bad Request", "Branch ID must be provided", 400)
+    try:
+        branch_id = resolve_branch_id(current_user, data.get('branch_id')) or require_branch_id(current_user)
+    except ValueError as e:
+        return error_response("Bad Request", str(e), 400)
 
     terminal_id = data.get('terminal_id', 'TERM-001')
     invoice_uuid = data.get('invoice_uuid') or str(uuid.uuid4())
@@ -47,6 +44,7 @@ def checkout(current_user):
             cust = Customer.query.get(existing.customer_id)
             if cust:
                 resp["loyalty_points_earned"] = 0
+                resp["loyalty_points_redeemed"] = 0
                 resp["customer_loyalty_points"] = cust.loyalty_points or 0
         return jsonify(resp), 200
 
@@ -66,6 +64,7 @@ def checkout(current_user):
     total_amount = 0.0
     cogs_amount = 0.0
     loyalty_points_earned = 0
+    loyalty_points_redeemed = 0
     customer = None
     customer_id = data.get('customer_id')
     if customer_id:
@@ -152,6 +151,7 @@ def checkout(current_user):
             db.session.add(sale_item)
 
         discount_amount = 0.0
+        discount_snapshot = None
         discount_data = data.get('discount')
         if discount_data and isinstance(discount_data, dict):
             d_type = discount_data.get('type')
@@ -160,12 +160,51 @@ def checkout(current_user):
                 discount_amount = total_amount * (d_value / 100.0)
             elif d_type == 'fixed' and d_value >= 0:
                 discount_amount = min(d_value, total_amount)
-            new_sale.discount_amount = discount_amount
-            new_sale.discount_snapshot = {
+            discount_snapshot = {
                 'name': discount_data.get('name', 'Discount'),
                 'type': d_type,
                 'value': d_value,
             }
+
+        # Loyalty redemption: 1 point = 1 currency unit discount (after other discounts)
+        loyalty_points_redeemed = 0
+        raw_redeem = data.get('loyalty_points_to_redeem', 0) or 0
+        try:
+            requested_redeem = int(raw_redeem)
+        except (TypeError, ValueError):
+            raise ValueError('Invalid loyalty_points_to_redeem')
+        if requested_redeem < 0:
+            raise ValueError('loyalty_points_to_redeem cannot be negative')
+        if requested_redeem > 0:
+            if not customer:
+                raise ValueError('A customer is required to redeem loyalty points')
+            available_points = int(customer.loyalty_points or 0)
+            if requested_redeem > available_points:
+                raise ValueError(
+                    f'Insufficient loyalty points (available: {available_points}, requested: {requested_redeem})'
+                )
+            remaining_after_discount = max(0.0, total_amount - discount_amount)
+            max_redeemable = int(remaining_after_discount)  # 1 pt = 1 Rs; cannot exceed remaining subtotal
+            if requested_redeem > max_redeemable:
+                raise ValueError(
+                    f'Cannot redeem more than {max_redeemable} points against this sale'
+                )
+            loyalty_points_redeemed = requested_redeem
+            discount_amount += float(loyalty_points_redeemed)
+            if discount_snapshot is None:
+                discount_snapshot = {}
+            discount_snapshot = {
+                **discount_snapshot,
+                'loyalty_points_redeemed': loyalty_points_redeemed,
+                'loyalty_discount': float(loyalty_points_redeemed),
+            }
+            if not discount_snapshot.get('name'):
+                discount_snapshot['name'] = 'Loyalty points'
+                discount_snapshot['type'] = 'loyalty'
+                discount_snapshot['value'] = loyalty_points_redeemed
+
+        new_sale.discount_amount = discount_amount
+        new_sale.discount_snapshot = discount_snapshot
 
         discounted = total_amount - discount_amount
         new_sale.tax_amount = discounted * tax_rate
@@ -173,6 +212,9 @@ def checkout(current_user):
         new_sale.cogs_amount = cogs_amount
 
         if customer:
+            # Redeem first, then award points for this sale
+            if loyalty_points_redeemed:
+                customer.loyalty_points = (customer.loyalty_points or 0) - loyalty_points_redeemed
             loyalty_points_earned = sum(int(item.get('quantity', 0)) for item in items)
             customer.loyalty_points = (customer.loyalty_points or 0) + loyalty_points_earned
 
@@ -228,6 +270,7 @@ def checkout(current_user):
             "cogs_amount": float(cogs_amount),
             "print_success": print_success,
             "loyalty_points_earned": loyalty_points_earned,
+            "loyalty_points_redeemed": loyalty_points_redeemed,
             "customer_loyalty_points": (customer.loyalty_points or 0) if customer else None,
         }), 201
 
@@ -279,7 +322,7 @@ def get_sales(current_user):
     if current_user.role != 'owner':
         query = query.filter_by(branch_id=current_user.branch_id)
     elif branch_id:
-        query = query.filter_by(branch_id=int(branch_id))
+        query = query.filter_by(branch_id=branch_id)
     if start_dt and end_dt:
         query = query.filter(Sale.created_at >= start_dt, Sale.created_at <= end_dt)
 

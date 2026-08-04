@@ -48,7 +48,7 @@ MIGRATIONS = [
     )""",
     """CREATE TABLE IF NOT EXISTS notifications (
         id SERIAL PRIMARY KEY,
-        branch_id INTEGER REFERENCES branches(id),
+        branch_id VARCHAR(36) REFERENCES branches(id),
         title VARCHAR(255) NOT NULL,
         message TEXT,
         severity VARCHAR(20) DEFAULT 'info',
@@ -73,7 +73,7 @@ MIGRATIONS = [
     )""",
     """CREATE TABLE IF NOT EXISTS inventory (
         id SERIAL PRIMARY KEY,
-        branch_id INTEGER NOT NULL REFERENCES branches(id),
+        branch_id VARCHAR(36) NOT NULL REFERENCES branches(id),
         product_id INTEGER NOT NULL REFERENCES products(id),
         stock_level INTEGER NOT NULL DEFAULT 0 CHECK (stock_level >= 0),
         updated_at TIMESTAMPTZ DEFAULT NOW(),
@@ -81,7 +81,7 @@ MIGRATIONS = [
     )""",
     """CREATE TABLE IF NOT EXISTS inventory_transactions (
         id SERIAL PRIMARY KEY,
-        branch_id INTEGER NOT NULL REFERENCES branches(id),
+        branch_id VARCHAR(36) NOT NULL REFERENCES branches(id),
         product_id INTEGER NOT NULL REFERENCES products(id),
         delta INTEGER NOT NULL,
         reason VARCHAR(50) NOT NULL,
@@ -131,8 +131,182 @@ MIGRATIONS = [
 ]
 
 
+def _migrate_branch_ids_to_uuid(db):
+    """Convert legacy integer branch PKs/FKs to UUID strings (PostgreSQL only)."""
+    bind = db.session.get_bind()
+    if bind.dialect.name != 'postgresql':
+        return
+
+    try:
+        row = db.session.execute(text(
+            "SELECT data_type FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = 'branches' AND column_name = 'id'"
+        )).fetchone()
+    except Exception:
+        db.session.rollback()
+        return
+
+    if not row or row[0] in ('character varying', 'uuid', 'text'):
+        return
+
+    print('Migrating branch IDs from integer to UUID…')
+    try:
+        db.session.execute(text('CREATE EXTENSION IF NOT EXISTS pgcrypto'))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    fk_tables = [
+        ('users', 'branch_id'),
+        ('settings', 'branch_id'),
+        ('inventory', 'branch_id'),
+        ('inventory_transactions', 'branch_id'),
+        ('product_batches', 'branch_id'),
+        ('goods_received_notes', 'branch_id'),
+        ('sales', 'branch_id'),
+        ('shifts', 'branch_id'),
+        ('notifications', 'branch_id'),
+    ]
+
+    try:
+        # Drop FKs that reference branches(id)
+        fks = db.session.execute(text(
+            "SELECT tc.table_name, tc.constraint_name "
+            "FROM information_schema.table_constraints tc "
+            "JOIN information_schema.constraint_column_usage ccu "
+            "  ON tc.constraint_name = ccu.constraint_name "
+            "WHERE tc.constraint_type = 'FOREIGN KEY' AND ccu.table_name = 'branches'"
+        )).fetchall()
+        for table_name, constraint_name in fks:
+            db.session.execute(text(
+                f'ALTER TABLE "{table_name}" DROP CONSTRAINT IF EXISTS "{constraint_name}"'
+            ))
+
+        db.session.execute(text(
+            "ALTER TABLE branches ADD COLUMN IF NOT EXISTS id_uuid VARCHAR(36)"
+        ))
+        db.session.execute(text(
+            "UPDATE branches SET id_uuid = gen_random_uuid()::text WHERE id_uuid IS NULL"
+        ))
+
+        for table_name, col in fk_tables:
+            exists = db.session.execute(text(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_name = :t"
+            ), {'t': table_name}).fetchone()
+            if not exists:
+                continue
+            db.session.execute(text(
+                f'ALTER TABLE "{table_name}" ADD COLUMN IF NOT EXISTS {col}_uuid VARCHAR(36)'
+            ))
+            db.session.execute(text(
+                f'UPDATE "{table_name}" t SET {col}_uuid = b.id_uuid '
+                f'FROM branches b WHERE t.{col} = b.id AND t.{col} IS NOT NULL'
+            ))
+
+        for table_name, col in fk_tables:
+            exists = db.session.execute(text(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_name = :t"
+            ), {'t': table_name}).fetchone()
+            if not exists:
+                continue
+            db.session.execute(text(f'ALTER TABLE "{table_name}" DROP COLUMN IF EXISTS {col}'))
+            db.session.execute(text(
+                f'ALTER TABLE "{table_name}" RENAME COLUMN {col}_uuid TO {col}'
+            ))
+
+        db.session.execute(text('ALTER TABLE branches DROP CONSTRAINT IF EXISTS branches_pkey'))
+        db.session.execute(text('ALTER TABLE branches DROP COLUMN IF EXISTS id'))
+        db.session.execute(text('ALTER TABLE branches RENAME COLUMN id_uuid TO id'))
+        db.session.execute(text('ALTER TABLE branches ADD PRIMARY KEY (id)'))
+
+        for table_name, col in fk_tables:
+            exists = db.session.execute(text(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_name = :t"
+            ), {'t': table_name}).fetchone()
+            if not exists:
+                continue
+            db.session.execute(text(
+                f'ALTER TABLE "{table_name}" '
+                f'ADD CONSTRAINT "{table_name}_{col}_fkey" '
+                f'FOREIGN KEY ({col}) REFERENCES branches(id)'
+            ))
+
+        db.session.commit()
+        print('Branch ID UUID migration complete.')
+    except Exception as e:
+        db.session.rollback()
+        print(f'Branch UUID migration failed (reset DB or migrate manually): {e}')
+
+
+def _migrate_branch_ids_to_hex(db):
+    """Convert dashed UUID branch ids to 32-char hex (strip hyphens)."""
+    try:
+        rows = db.session.execute(text("SELECT id FROM branches WHERE id LIKE '%-%'")).fetchall()
+    except Exception:
+        db.session.rollback()
+        return
+
+    if not rows:
+        return
+
+    print('Migrating dashed branch UUIDs to hex…')
+    bind = db.session.get_bind()
+    inspector = None
+    try:
+        from sqlalchemy import inspect as sa_inspect
+        inspector = sa_inspect(bind)
+        existing_tables = set(inspector.get_table_names())
+    except Exception:
+        existing_tables = {
+            'users', 'settings', 'inventory', 'inventory_transactions',
+            'product_batches', 'goods_received_notes', 'sales', 'shifts', 'notifications',
+        }
+
+    fk_tables = [
+        t for t in (
+            'users', 'settings', 'inventory', 'inventory_transactions',
+            'product_batches', 'goods_received_notes', 'sales', 'shifts', 'notifications',
+        ) if t in existing_tables
+    ]
+
+    try:
+        for (old_id,) in rows:
+            new_id = str(old_id).replace('-', '').lower()
+            if str(old_id) == new_id:
+                continue
+
+            exists = db.session.execute(
+                text('SELECT 1 FROM branches WHERE id = :new'), {'new': new_id}
+            ).fetchone()
+            if not exists:
+                db.session.execute(text(
+                    'INSERT INTO branches (id, name, address, phone, created_at, archived_at) '
+                    'SELECT :new, name, address, phone, created_at, archived_at '
+                    'FROM branches WHERE id = :old'
+                ), {'new': new_id, 'old': old_id})
+
+            for table in fk_tables:
+                db.session.execute(text(
+                    f'UPDATE {table} SET branch_id = :new WHERE branch_id = :old'
+                ), {'new': new_id, 'old': old_id})
+
+            db.session.execute(text('DELETE FROM branches WHERE id = :old'), {'old': old_id})
+
+        db.session.commit()
+        print('Branch ID hex migration complete.')
+    except Exception as e:
+        db.session.rollback()
+        print(f'Branch hex migration failed: {e}')
+
+
 def run_migrations(db):
     """Apply additive migrations; ignore already-applied changes."""
+    _migrate_branch_ids_to_uuid(db)
+    _migrate_branch_ids_to_hex(db)
+
     for sql in MIGRATIONS:
         try:
             db.session.execute(text(sql))

@@ -3,6 +3,7 @@ import { Loader2, Upload } from 'lucide-react';
 import { showToast } from '../Toast';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { get, put, getUserMessage } from '../../api';
+import { getBranchId } from '../../branch';
 
 type SettingsResponse = { config?: Record<string, unknown> };
 
@@ -60,7 +61,7 @@ export default function ReceiptSettings() {
       setQrCodeContent('');
       setTaxRate(8);
 
-      const activeBranchId = localStorage.getItem('active_branch_id') || '';
+      const activeBranchId = getBranchId();
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const data = await get<SettingsResponse>(`/settings/${query}`);
       const st = (data?.config?.receipt_settings ?? {}) as Record<string, string | number | undefined>;
@@ -96,7 +97,7 @@ export default function ReceiptSettings() {
   const handleSave = async () => {
     try {
       setSaving(true);
-      const activeBranchId = localStorage.getItem('active_branch_id') || '';
+      const activeBranchId = getBranchId();
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const existing = await get<SettingsResponse>(`/settings/${query}`);
       const currentConfig = (existing?.config ?? {}) as Record<string, unknown>;
@@ -124,8 +125,8 @@ export default function ReceiptSettings() {
           qrCodeContent,
         },
       };
-      const payload: { config: Record<string, unknown>; branch_id?: number } = { config: newSettings };
-      if (activeBranchId) payload.branch_id = parseInt(activeBranchId, 10);
+      const payload: { config: Record<string, unknown>; branch_id?: string } = { config: newSettings };
+      if (activeBranchId) payload.branch_id = activeBranchId;
       await put('/settings/', payload);
       showToast('Receipt settings saved!', 'success');
     } catch (e) {

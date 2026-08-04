@@ -6,6 +6,7 @@ import { showConfirm } from '../components/ConfirmDialog';
 import { useScanner } from '../hooks/useScanner';
 import { formatCurrency } from '../utils/formatCurrency';
 import { get, post, put, patch, del, getUserMessage } from '../api';
+import { getBranchId } from '../branch';
 const ALL_VARIANTS = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
 
 type Product = {
@@ -101,7 +102,7 @@ export default function Inventory() {
 
   const fetchData = async () => {
     setLoading(true);
-    const activeBranchId = localStorage.getItem('active_branch_id') ?? '1';
+    const activeBranchId = getBranchId();
     const productQuery = includeArchived ? '/products/?include_archived=1' : '/products/';
     try {
       const [prodData, settingsData, invData] = await Promise.all([
@@ -273,12 +274,12 @@ export default function Inventory() {
     });
     
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') ?? '1';
+      const activeBranchId = getBranchId();
       await post('/inventory/update', {
         product_id: productId,
         variant_sku_suffix: variantSuffix,
         stock_delta: delta,
-        branch_id: parseInt(activeBranchId, 10),
+        branch_id: activeBranchId,
       });
     } catch {
       fetchData(); // Revert on failure

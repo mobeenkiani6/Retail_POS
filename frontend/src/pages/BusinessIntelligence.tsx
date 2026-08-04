@@ -6,6 +6,7 @@ import Card from '../components/ui/Card';
 import DataTable from '../components/ui/DataTable';
 import { get } from '../api';
 import { formatCurrency } from '../utils/formatCurrency';
+import { getBranchId } from '../branch';
 
 export default function BusinessIntelligence() {
   const [analytics, setAnalytics] = useState<{ total_sales: number; total_transactions: number; gross_profit: number; cogs: number } | null>(null);
@@ -13,7 +14,7 @@ export default function BusinessIntelligence() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const branchId = localStorage.getItem('active_branch_id') || '1';
+    const branchId = getBranchId();
     Promise.all([
       get<{ total_sales: number; total_transactions: number; gross_profit: number; cogs: number }>(`/sales/analytics?time_filter=today&branch_id=${branchId}`),
       get<{ sales?: Record<string, unknown>[] }>(`/sales/?time_filter=week&branch_id=${branchId}`),

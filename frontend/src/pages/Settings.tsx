@@ -12,28 +12,31 @@ import { useTheme } from '../hooks/useTheme';
 import appLogger, { type LogEntry } from '../utils/logger';
 import { get, put, post, getUserMessage } from '../api';
 import { showConfirm } from '../components/ConfirmDialog';
+import { getBranchId } from '../branch';
+import { useSettingsStore } from '../stores/settingsStore';
 
 type SettingsResponse = { config?: Record<string, unknown> };
 
 export default function Settings() {
-  const [activeTab, setActiveTab] = useState('general');
+  const {
+    activeTab,
+    taxEnabled,
+    taxPercentage,
+    taxRatesByPaymentMethod,
+    hardware,
+    setActiveTab,
+    setTaxEnabled,
+    setTaxPercentage,
+    setTaxRatesByPaymentMethod,
+    setHardware,
+  } = useSettingsStore();
   const { theme, setTheme, isDark } = useTheme();
 
-  // ── Legacy sections removed — use CategoriesSettings tab ──
-  
-  // ── Tax settings state ──
-  const [taxEnabled, setTaxEnabled] = useState<boolean>(true);
-  const [taxPercentage, setTaxPercentage] = useState<number>(0);
-  const [taxRatesByPaymentMethod, setTaxRatesByPaymentMethod] = useState<Record<string, number>>({
-    Cash: 0, Card: 8, UPI: 8, Wallet: 0, Split: 8,
-  });
   const [taxLoading, setTaxLoading] = useState(false);
   const [taxSaving, setTaxSaving] = useState(false);
   const [taxFeedback, setTaxFeedback] = useState('');
-  const PAYMENT_METHODS = ['Cash', 'Card', 'UPI', 'Wallet', 'Split'];
+  const PAYMENT_METHODS = ['Cash', 'Card'];
 
-  // ── Hardware settings state ──
-  const [hardware, setHardware] = useState({ printer_vendor_id: '', printer_product_id: '', paper_width: '80mm' });
   const [hardwareLoading, setHardwareLoading] = useState(false);
   const [hardwareSaving, setHardwareSaving] = useState(false);
   const [hardwareFeedback, setHardwareFeedback] = useState('');
@@ -66,7 +69,7 @@ export default function Settings() {
   const tabs = ['General', 'Receipt', 'Hardware', 'Categories', 'Variants', 'Units', 'Brands', 'Suppliers', 'Tax & Rates', 'Discounts'];
   if (isOwner) {
     tabs.push('Users');
-    tabs.push('Branches');
+    tabs.push('Branch');
   }
   tabs.push('App Logs');
 
@@ -84,7 +87,7 @@ export default function Settings() {
   const fetchDiscounts = async () => {
     setDiscountsLoading(true);
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') ?? '';
+      const activeBranchId = getBranchId();
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const data = await get<SettingsResponse>(`/settings/${query}`);
       const list = data.config?.discounts;
@@ -100,15 +103,15 @@ export default function Settings() {
     setDiscountsSaving(true);
     setDiscountsFeedback('');
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') ?? '';
+      const activeBranchId = getBranchId();
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const existing = await get<SettingsResponse>(`/settings/${query}`);
       const currentConfig = (existing?.config ?? {}) as Record<string, unknown>;
-      const payload: { config: Record<string, unknown>; branch_id?: number } = {
+      const payload: { config: Record<string, unknown>; branch_id?: string } = {
         config: { ...currentConfig, discounts: updatedList },
       };
       if (activeBranchId) {
-        payload.branch_id = parseInt(activeBranchId, 10);
+        payload.branch_id = activeBranchId;
       }
       await put('/settings/', payload);
       setDiscounts(updatedList);
@@ -169,7 +172,7 @@ export default function Settings() {
   const fetchTaxSettings = async () => {
     setTaxLoading(true);
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') || '';
+      const activeBranchId = getBranchId();
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const data = await get<SettingsResponse>(`/settings/${query}`);
       const config = (data?.config ?? {}) as Record<string, unknown>;
@@ -179,12 +182,9 @@ export default function Settings() {
       setTaxRatesByPaymentMethod({
         Cash: rates?.Cash ?? 0,
         Card: rates?.Card ?? 8,
-        UPI: rates?.UPI ?? rates?.['Online Transfer'] ?? 8,
-        Wallet: rates?.Wallet ?? 0,
-        Split: rates?.Split ?? rates?.Card ?? 8,
       });
     } catch {
-      setTaxRatesByPaymentMethod({ Cash: 0, Card: 8, UPI: 8, Wallet: 0, Split: 8 });
+      setTaxRatesByPaymentMethod({ Cash: 0, Card: 8 });
     } finally {
       setTaxLoading(false);
     }
@@ -194,11 +194,11 @@ export default function Settings() {
     setTaxSaving(true);
     setTaxFeedback('');
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') || '';
+      const activeBranchId = getBranchId();
       const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
       const existing = await get<SettingsResponse>(`/settings/${query}`);
       const currentConfig = (existing?.config ?? {}) as Record<string, unknown>;
-      const payload: { config: Record<string, unknown>; branch_id?: number } = {
+      const payload: { config: Record<string, unknown>; branch_id?: string } = {
         config: {
           ...currentConfig,
           tax_enabled: taxEnabled,
@@ -206,7 +206,7 @@ export default function Settings() {
           tax_rates_by_payment_method: { ...taxRatesByPaymentMethod },
         },
       };
-      if (activeBranchId) payload.branch_id = parseInt(activeBranchId, 10);
+      if (activeBranchId) payload.branch_id = activeBranchId;
       await put('/settings/', payload);
       setTaxFeedback('Tax settings saved!');
       setTimeout(() => setTaxFeedback(''), 2000);
@@ -314,7 +314,7 @@ export default function Settings() {
 
         {activeTab === 'receipt' && <ReceiptSettings />}
         {activeTab === 'users' && <UsersSettings />}
-        {activeTab === 'branches' && <BranchesSettings />}
+        {activeTab === 'branch' && <BranchesSettings />}
 
         {activeTab === 'hardware' && (
           <div className="max-w-2xl">
@@ -476,7 +476,7 @@ export default function Settings() {
                       type="button"
                       role="switch"
                       aria-checked={taxEnabled}
-                      onClick={() => setTaxEnabled(v => !v)}
+                      onClick={() => setTaxEnabled(!taxEnabled)}
                       className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border transition-colors focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-2 ${
                         taxEnabled ? 'bg-accent-600 border-accent-600' : 'bg-neutral-300 dark:bg-neutral-700 border-border'
                       }`}

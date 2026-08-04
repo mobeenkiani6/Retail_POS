@@ -6,14 +6,13 @@ from app.models import (
     User, SyncOutbox, Customer, AuditLog, Inventory,
 )
 from app.utils.auth_decorators import token_required
+from app.branch_scope import resolve_branch_id
 
 dashboard_bp = Blueprint('dashboard', __name__)
 
 
 def _branch_filter(current_user, branch_id):
-    if current_user.role != 'owner':
-        return current_user.branch_id
-    return int(branch_id) if branch_id else current_user.branch_id
+    return resolve_branch_id(current_user, branch_id)
 
 
 def _today_range():

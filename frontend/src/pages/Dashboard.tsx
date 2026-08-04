@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useScanner } from '../hooks/useScanner';
-import { ShoppingBag, Plus, Minus, Trash2, Loader2, CreditCard, Banknote, Smartphone, LayoutGrid, List, X, Printer, Usb, Tag, ChevronDown, ChevronRight, CheckCircle, XCircle } from 'lucide-react';
+import { ShoppingBag, Plus, Minus, Trash2, Loader2, CreditCard, Banknote, LayoutGrid, List, X, Printer, Usb, Tag, ChevronDown, ChevronRight, CheckCircle, XCircle } from 'lucide-react';
 import { formatCurrency } from '../utils/formatCurrency';
 import { get, post, getUserMessage } from '../api';
 import SearchInput from '../components/ui/SearchInput';
+import { getBranchId } from '../branch';
 
 type Product = {
   id: number;
@@ -50,11 +51,11 @@ export default function Dashboard() {
   }, []);
   const [loading, setLoading] = useState(true);
   const [productForVariants, setProductForVariants] = useState<Product | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<'Card' | 'Cash' | 'Online Transfer'>('Card');
+  const [paymentMethod, setPaymentMethod] = useState<'Card' | 'Cash'>('Card');
   const [inventory, setInventory] = useState<Record<string, Record<string, number>>>({});
   const [notification, setNotification] = useState<{ type: 'ok' | 'error'; msg: string } | null>(null);
   const [taxEnabled, setTaxEnabled] = useState<boolean>(true);
-  const [taxRatesByPaymentMethod, setTaxRatesByPaymentMethod] = useState<Record<string, number>>({ Cash: 0, Card: 8, 'Online Transfer': 8 });
+  const [taxRatesByPaymentMethod, setTaxRatesByPaymentMethod] = useState<Record<string, number>>({ Cash: 0, Card: 8 });
   const [orderId, setOrderId] = useState<string>('#ORD-0001');
   const [discounts, setDiscounts] = useState<DiscountPreset[]>([]);
   const [appliedDiscount, setAppliedDiscount] = useState<DiscountPreset | null>(null);
@@ -71,7 +72,7 @@ export default function Dashboard() {
 
   const fetchData = async () => {
     setLoading(true);
-    const activeBranchId = localStorage.getItem('active_branch_id') ?? user?.branch_id ?? '1';
+    const activeBranchId = getBranchId();
     try {
       const [prodData, settingsData, invData] = await Promise.all([
         get<{ products?: Product[] }>(`/products/`),
@@ -86,7 +87,6 @@ export default function Dashboard() {
       setTaxRatesByPaymentMethod({
         Cash: rates.Cash ?? 0,
         Card: rates.Card ?? 8,
-        'Online Transfer': rates['Online Transfer'] ?? 8,
       });
       const rawDiscounts = Array.isArray(config?.discounts) ? (config.discounts as (DiscountPreset & { archived?: boolean })[]) : [];
       setDiscounts(rawDiscounts.filter(d => !d.archived));
@@ -204,11 +204,11 @@ export default function Dashboard() {
     }));
 
     try {
-      const activeBranchId = localStorage.getItem('active_branch_id') ?? user?.branch_id ?? '1';
+      const activeBranchId = getBranchId();
       const data = await post<{ sale_id?: number; total?: number; message?: string; print_success?: boolean }>('/sales/checkout', {
         payment_method: paymentMethod,
         items,
-        branch_id: parseInt(activeBranchId, 10),
+        branch_id: activeBranchId,
         discount: appliedDiscount ? { id: appliedDiscount.id, name: appliedDiscount.name, type: appliedDiscount.type, value: appliedDiscount.value } : null,
       });
       const saleId = data?.sale_id ?? 0;
@@ -243,7 +243,7 @@ export default function Dashboard() {
     setCouponDropdownOpen(false);
   };
 
-  const getActiveBranchId = () => localStorage.getItem('active_branch_id') ?? user?.branch_id ?? '1';
+  const getActiveBranchId = () => getBranchId();
 
   const activateCouponForAllOrders = () => {
     if (!appliedDiscount) return;
@@ -646,7 +646,7 @@ export default function Dashboard() {
             </button>
             {paymentMethodSectionExpanded && (
             <div className="mt-2">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => setPaymentMethod('Cash')}
                 className={`py-2 px-1 flex flex-col items-center justify-center gap-1 rounded-xl border-2 transition-all active:scale-[0.98] ${paymentMethod === 'Cash' ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-neutral-200 hover:border-brand-300 text-neutral-500'}`}
@@ -660,13 +660,6 @@ export default function Dashboard() {
               >
                 <CreditCard className="w-5 h-5" />
                 <span className="text-xs font-bold">Card</span>
-              </button>
-              <button
-                onClick={() => setPaymentMethod('Online Transfer')}
-                className={`py-2 px-1 flex flex-col items-center justify-center gap-1 rounded-xl border-2 transition-all active:scale-[0.98] ${paymentMethod === 'Online Transfer' ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-neutral-200 hover:border-brand-300 text-neutral-500'}`}
-              >
-                <Smartphone className="w-5 h-5" />
-                <span className="text-[11px] font-bold whitespace-nowrap">Online</span>
               </button>
             </div>
             </div>

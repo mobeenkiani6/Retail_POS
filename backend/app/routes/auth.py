@@ -1,5 +1,10 @@
 from flask import Blueprint, jsonify, request
 from app.models import db, User, Branch
+from app.branch_scope import (
+    get_configured_branch_id,
+    new_branch_id,
+    coerce_branch_id,
+)
 from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
 from datetime import datetime, timedelta
@@ -15,15 +20,23 @@ def check_status():
     Used by the frontend to determine if it should route to /onboarding or /login.
     """
     owner_exists = User.query.filter_by(role='owner').first() is not None
+    configured = None
+    try:
+        configured = get_configured_branch_id()
+    except ValueError:
+        configured = None
     return jsonify({
-        "initialized": owner_exists
+        "initialized": owner_exists,
+        "branch_id": configured,
+        "single_branch": True,
     }), 200
 
 @auth_bp.route('/setup', methods=['POST'])
 def initial_setup():
     """
-    Registers the first owner and the primary branch.
-    Only allows execution if no owner exists yet.
+    Registers the first owner and the (single) branch for this POS instance.
+    Branch id is a 32-char hex string: from BRANCH_ID env, optional body.branch_id
+    (admin panel), or a newly generated hex id.
     """
     if User.query.filter_by(role='owner').first():
         return jsonify({"error": "System is already initialized."}), 400
@@ -32,17 +45,31 @@ def initial_setup():
     if not data or not all(k in data for k in ("username", "password", "branch_name")):
         return jsonify({"error": "Missing required fields (username, password, branch_name)"}), 400
 
-    # 1. Create Initial Branch
+    try:
+        configured = get_configured_branch_id()
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    requested = coerce_branch_id(data.get('branch_id'))
+    if configured and requested and requested != configured:
+        return jsonify({
+            "error": "branch_id does not match BRANCH_ID configured for this POS instance."
+        }), 400
+
+    branch_id = configured or requested or new_branch_id()
+    if Branch.query.get(branch_id):
+        return jsonify({"error": "Branch with this id already exists."}), 409
+
     try:
         new_branch = Branch(
+            id=branch_id,
             name=data['branch_name'],
             address=data.get('branch_address', ''),
             phone=data.get('branch_phone', '')
         )
         db.session.add(new_branch)
-        db.session.flush() # Get the branch ID
+        db.session.flush()
 
-        # 2. Create Owner User
         hashed_password = generate_password_hash(data['password'])
         new_owner = User(
             branch_id=new_branch.id,
@@ -53,7 +80,6 @@ def initial_setup():
         db.session.add(new_owner)
         db.session.commit()
 
-        # 3. Generate initial token
         token = jwt.encode({
             'user_id': new_owner.id,
             'role': new_owner.role,
@@ -94,16 +120,26 @@ def login():
         user.last_login_at = datetime.utcnow()
         db.session.commit()
 
+    # Prefer configured BRANCH_ID so JWT always matches this POS instance
+    try:
+        branch_id = get_configured_branch_id() or user.branch_id
+    except ValueError:
+        branch_id = user.branch_id
+
     token = jwt.encode({
         'user_id': user.id,
         'role': user.role,
-        'branch_id': user.branch_id,
+        'branch_id': branch_id,
         'exp': datetime.utcnow() + timedelta(days=30)
     }, SECRET_KEY, algorithm="HS256")
 
     branch_name = ''
-    if user.branch:
-        branch_name = user.branch.name
+    if branch_id:
+        branch = Branch.query.get(branch_id)
+        if branch:
+            branch_name = branch.name
+        elif user.branch:
+            branch_name = user.branch.name
 
     return jsonify({
         'token': token,
@@ -111,16 +147,31 @@ def login():
             'id': user.id,
             'username': user.username,
             'role': user.role,
-            'branch_id': user.branch_id,
+            'branch_id': branch_id,
             'branch_name': branch_name
         }
     }), 200
 
 @auth_bp.route('/branches', methods=['GET'])
 def get_branches():
-    branches = Branch.query.all()
+    """Return the single branch for this POS (configured or the only active one)."""
+    try:
+        configured = get_configured_branch_id()
+    except ValueError:
+        configured = None
+
+    if configured:
+        branch = Branch.query.get(configured)
+        branches = [branch] if branch else []
+    else:
+        branches = Branch.query.filter(Branch.archived_at == None).order_by(Branch.created_at.asc()).all()
+        if len(branches) > 1:
+            branches = branches[:1]
+
     output = []
     for branch in branches:
+        if not branch:
+            continue
         output.append({
             'id': branch.id,
             'name': branch.name,

@@ -8,15 +8,15 @@ A full-stack **Point of Sale (POS)** system built for retail stores — checkout
 - **Products** — parent products with pack-size SKUs, pricing, categories, brands, and suppliers
 - **Inventory** — per-SKU stock levels, adjustments, movement history, and low-stock alerts
 - **Customers** — profiles, loyalty points, and purchase history
-- **Settings** — branches, users & roles, categories, variants, units, brands, suppliers, receipt templates
+- **Settings** — single-branch profile (hex id), users & roles, categories, variants, units, brands, suppliers, receipt templates
 - **Reports & dashboards** — sales summaries and operational insights
-- **Dark / light theme** — readable UI in both modes
-
+- **Dark / light theme** — see `design.md` for the design system
+- **Admin link** — each POS install is scoped to one branch hex id (`BRANCH_ID` / `VITE_BRANCH_ID`)
 ## Tech Stack
 
 | Layer | Stack |
 |-------|--------|
-| Frontend | React 19, TypeScript, Vite, Tailwind CSS 4, Framer Motion, Recharts |
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS 4, Framer Motion, Recharts, Zustand |
 | Backend | Python, Flask, Flask-SocketIO, SQLAlchemy |
 | Database | PostgreSQL 15 |
 | Desktop (optional) | Tauri |
@@ -83,7 +83,17 @@ Create `backend/.env` with your database URL and secrets, for example:
 ```env
 DATABASE_URL=postgresql://sootshoot:password123@localhost:5433/sootshoot
 SECRET_KEY=your-secret-key
+# Hex id from admin panel for this store (optional until setup)
+BRANCH_ID=
 ```
+
+Optional frontend `frontend/.env`:
+
+```env
+VITE_BRANCH_ID=<same-hex-id-as-BRANCH_ID>
+```
+
+Each POS install is **single-branch scoped**. Set the same 32-character hex id on backend and frontend so the terminal stays aligned with the admin panel. UI theme rules: see [`design.md`](./design.md).
 
 > **Never commit** `backend/.env` — it is listed in `.gitignore`.
 

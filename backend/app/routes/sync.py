@@ -9,6 +9,7 @@ from app.services.sync_service import (
     mark_synced,
 )
 from app.errors import error_response
+from app.branch_scope import resolve_branch_id
 
 sync_bp = Blueprint('sync', __name__)
 
@@ -32,7 +33,7 @@ def sync_push(current_user):
                 payload = event['payload']
                 sale = Sale(
                     invoice_uuid=invoice_uuid,
-                    branch_id=payload.get('branch_id', current_user.branch_id or 1),
+                    branch_id=resolve_branch_id(current_user, payload.get('branch_id')),
                     user_id=payload.get('user_id', current_user.id),
                     terminal_id=payload.get('terminal_id'),
                     total_amount=payload.get('total_amount', 0),

@@ -3,6 +3,7 @@ from app.models import db, Product, ProductBatch, BatchMovement
 from app.utils.auth_decorators import token_required, role_required
 from app.services.fefo_service import batch_status, effective_sell_price, _get_expiry_config
 from app.errors import error_response
+from app.branch_scope import resolve_branch_id
 
 batches_bp = Blueprint('batches', __name__)
 
@@ -34,10 +35,7 @@ def list_batches(current_user):
     product_id = request.args.get('product_id')
     search = request.args.get('search', '').strip()
 
-    if current_user.role != 'owner':
-        branch_id = current_user.branch_id
-    elif branch_id:
-        branch_id = int(branch_id)
+    branch_id = resolve_branch_id(current_user, branch_id)
 
     query = ProductBatch.query
     if branch_id:
@@ -86,10 +84,7 @@ def get_batch(current_user, batch_id):
 @token_required
 def batches_by_product(current_user):
     branch_id = request.args.get('branch_id')
-    if current_user.role != 'owner':
-        branch_id = current_user.branch_id
-    elif branch_id:
-        branch_id = int(branch_id)
+    branch_id = resolve_branch_id(current_user, branch_id)
 
     products = Product.query.filter(Product.archived_at == None).all()
     result = []

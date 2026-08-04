@@ -1,23 +1,24 @@
-import { Fragment, useEffect, useState } from 'react';
-import { Plus, Edit2, Archive, RotateCcw, Copy, Package, ChevronDown, ChevronRight } from 'lucide-react';
+import { Fragment, useEffect, useState, useMemo } from 'react';
+import { Plus, Edit2, Archive, RotateCcw, Copy, Package, ChevronDown, ChevronRight, Trash2 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
 import SearchInput from '../components/ui/SearchInput';
-import ProductForm, { emptyProductForm, productToForm, formToPayload, type ProductFormData } from '../components/products/ProductForm';
+import ProductForm, { productToForm, formToPayload } from '../components/products/ProductForm';
 import { get, post, put, patch, del, getUserMessage } from '../api';
 import { formatCurrency } from '../utils/formatCurrency';
 import { showToast } from '../components/Toast';
 import { showConfirm } from '../components/ConfirmDialog';
 import { formatSkuLabel, priceRange, type ProductParent, type ProductSku } from '../utils/productSkus';
+import { getBranchId } from '../branch';
+import { useProductsStore } from '../stores/productsStore';
 
 type CategoryOption = { id: number; name: string };
 type Option = { id: number; name: string; abbreviation?: string };
 
 export default function GroceryProducts() {
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
-  const branchId = parseInt(localStorage.getItem('active_branch_id') || user?.branch_id || '1', 10);
+  const branchId = getBranchId();
 
   const [products, setProducts] = useState<ProductParent[]>([]);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
@@ -26,12 +27,23 @@ export default function GroceryProducts() {
   const [suppliers, setSuppliers] = useState<Option[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [search, setSearch] = useState('');
-  const [showArchived, setShowArchived] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<ProductParent | null>(null);
-  const [form, setForm] = useState<ProductFormData>(emptyProductForm());
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  const search = useProductsStore(s => s.search);
+  const setSearch = useProductsStore(s => s.setSearch);
+  const showArchived = useProductsStore(s => s.showArchived);
+  const setShowArchived = useProductsStore(s => s.setShowArchived);
+  const modalOpen = useProductsStore(s => s.modalOpen);
+  const form = useProductsStore(s => s.form);
+  const setForm = useProductsStore(s => s.setForm);
+  const editingId = useProductsStore(s => s.editingId);
+  const expandedIds = useProductsStore(s => s.expandedIds);
+  const setExpandedIds = useProductsStore(s => s.setExpandedIds);
+  const openCreate = useProductsStore(s => s.openCreate);
+  const openEditStore = useProductsStore(s => s.openEdit);
+  const closeModal = useProductsStore(s => s.closeModal);
+  const clearDraft = useProductsStore(s => s.clearDraft);
+
+  const expanded = useMemo(() => new Set(expandedIds), [expandedIds]);
 
   const load = () => {
     setLoading(true);
@@ -61,22 +73,19 @@ export default function GroceryProducts() {
   );
 
   const toggleExpand = (id: number) => {
-    setExpanded(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
+    setExpandedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
-  const openCreate = () => { setEditing(null); setForm(emptyProductForm()); setModalOpen(true); };
-  const openEdit = (p: ProductParent) => { setEditing(p); setForm(productToForm(p as unknown as Record<string, unknown>)); setModalOpen(true); };
+  const openEdit = (p: ProductParent) => {
+    openEditStore(p.id, productToForm(p as unknown as Record<string, unknown>));
+  };
 
   const handleSave = async () => {
     if (!form.name.trim()) {
       showToast('Product name is required', 'error');
       return;
     }
-    if (!editing && form.skus.length === 0) {
+    if (!editingId && form.skus.length === 0) {
       showToast('Add at least one SKU (pack size)', 'error');
       return;
     }
@@ -89,8 +98,8 @@ export default function GroceryProducts() {
     setSaving(true);
     try {
       const payload = formToPayload(form, branchId);
-      if (editing) {
-        const res = await put<{ product: ProductParent }>(`/products/${editing.id}`, payload);
+      if (editingId) {
+        const res = await put<{ product: ProductParent }>(`/products/${editingId}`, payload);
         if (res?.product) setProducts(prev => prev.map(p => p.id === res.product.id ? res.product : p));
         showToast('Product updated', 'success');
       } else {
@@ -98,7 +107,7 @@ export default function GroceryProducts() {
         if (res?.product) setProducts(prev => [...prev, res.product]);
         showToast('Product created', 'success');
       }
-      setModalOpen(false);
+      clearDraft();
       load();
     } catch (e) {
       showToast(getUserMessage(e), 'error');
@@ -108,23 +117,61 @@ export default function GroceryProducts() {
   };
 
   const handleArchive = async (p: ProductParent) => {
-    const ok = await showConfirm({ title: 'Archive Product', message: `Archive "${p.name}" and all SKUs?`, variant: 'danger' });
+    const ok = await showConfirm({
+      title: 'Archive Product',
+      message: `Archive "${p.name}" and all SKUs? You can restore it later.`,
+      variant: 'danger',
+      confirmLabel: 'Archive',
+    });
     if (!ok) return;
-    await del(`/products/${p.id}`);
-    showToast('Product archived', 'success');
-    load();
+    try {
+      await patch(`/products/${p.id}/archive`, {});
+      showToast('Product archived', 'success');
+      load();
+    } catch (e) {
+      showToast(getUserMessage(e), 'error');
+    }
+  };
+
+  const handleDelete = async (p: ProductParent) => {
+    const ok = await showConfirm({
+      title: 'Delete Product?',
+      message: `"${p.name}" will be removed permanently. This cannot be undone.`,
+      relatedEffects: [
+        'All SKUs and stock for this product will be deleted.',
+        'Past sale lines will be kept and show as an unknown product.',
+      ],
+      confirmLabel: 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await del(`/products/${p.id}`);
+      showToast('Product deleted', 'success');
+      load();
+    } catch (e) {
+      showToast(getUserMessage(e), 'error');
+    }
   };
 
   const handleRestore = async (p: ProductParent) => {
-    await patch(`/products/${p.id}/restore`, {});
-    showToast('Product restored', 'success');
-    load();
+    try {
+      await patch(`/products/${p.id}/restore`, {});
+      showToast('Product restored', 'success');
+      load();
+    } catch (e) {
+      showToast(getUserMessage(e), 'error');
+    }
   };
 
   const handleDuplicate = async (p: ProductParent) => {
-    await post(`/products/${p.id}/duplicate`, {});
-    showToast('Product duplicated', 'success');
-    load();
+    try {
+      await post(`/products/${p.id}/duplicate`, {});
+      showToast('Product duplicated', 'success');
+      load();
+    } catch (e) {
+      showToast(getUserMessage(e), 'error');
+    }
   };
 
   return (
@@ -164,7 +211,7 @@ export default function GroceryProducts() {
                 <th className="px-4 py-3 font-semibold">Price Range</th>
                 <th className="px-4 py-3 font-semibold">Total Stock</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
-                <th className="px-4 py-3 font-semibold w-28">Actions</th>
+                <th className="px-4 py-3 font-semibold w-36">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -173,7 +220,7 @@ export default function GroceryProducts() {
                 const isOpen = expanded.has(p.id);
                 return (
                   <Fragment key={p.id}>
-                    <tr key={p.id} className="border-b border-border hover:bg-canvas-subtle/50">
+                    <tr className="border-b border-border hover:bg-canvas-subtle/50">
                       <td className="px-4 py-3">
                         {skus.length > 0 && (
                           <button type="button" onClick={() => toggleExpand(p.id)} className="p-0.5 rounded hover:bg-canvas-subtle text-muted">
@@ -199,12 +246,29 @@ export default function GroceryProducts() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex gap-1">
-                          <button type="button" onClick={() => openEdit(p)} className="p-1.5 rounded-lg hover:bg-canvas-subtle text-muted"><Edit2 className="w-3.5 h-3.5" /></button>
-                          <button type="button" onClick={() => handleDuplicate(p)} className="p-1.5 rounded-lg hover:bg-canvas-subtle text-muted"><Copy className="w-3.5 h-3.5" /></button>
-                          {p.archived_at
-                            ? <button type="button" onClick={() => handleRestore(p)} className="p-1.5 rounded-lg hover:bg-canvas-subtle text-muted"><RotateCcw className="w-3.5 h-3.5" /></button>
-                            : <button type="button" onClick={() => handleArchive(p)} className="p-1.5 rounded-lg hover:bg-canvas-subtle text-muted"><Archive className="w-3.5 h-3.5" /></button>
-                          }
+                          <button type="button" onClick={() => openEdit(p)} className="p-1.5 rounded-lg hover:bg-canvas-subtle text-muted" title="Edit">
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button type="button" onClick={() => handleDuplicate(p)} className="p-1.5 rounded-lg hover:bg-canvas-subtle text-muted" title="Duplicate">
+                            <Copy className="w-3.5 h-3.5" />
+                          </button>
+                          {p.archived_at ? (
+                            <button type="button" onClick={() => handleRestore(p)} className="p-1.5 rounded-lg hover:bg-canvas-subtle text-muted" title="Restore">
+                              <RotateCcw className="w-3.5 h-3.5" />
+                            </button>
+                          ) : (
+                            <button type="button" onClick={() => handleArchive(p)} className="p-1.5 rounded-lg hover:bg-canvas-subtle text-muted" title="Archive">
+                              <Archive className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(p)}
+                            className="p-1.5 rounded-lg hover:bg-danger-soft text-muted hover:text-danger"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -250,12 +314,12 @@ export default function GroceryProducts() {
 
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title={editing ? 'Edit Product' : 'New Product'}
+        onClose={closeModal}
+        title={editingId ? 'Edit Product' : 'New Product'}
         size="2xl"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
+            <Button variant="secondary" onClick={closeModal}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save Product'}</Button>
           </>
         }
@@ -267,8 +331,8 @@ export default function GroceryProducts() {
           units={units}
           brands={brands}
           suppliers={suppliers}
-          isEditing={!!editing}
-          productId={editing?.id}
+          isEditing={!!editingId}
+          productId={editingId ?? undefined}
         />
       </Modal>
     </div>

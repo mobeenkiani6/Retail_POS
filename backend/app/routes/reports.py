@@ -4,6 +4,7 @@ from sqlalchemy import func
 from app.models import db, Sale, SaleItem, Product, ProductBatch, Category, Supplier, Customer, User
 from app.utils.auth_decorators import token_required, role_required
 from app.routes.sales import get_time_filter_ranges
+from app.branch_scope import resolve_branch_id
 
 reports_bp = Blueprint('reports', __name__)
 
@@ -13,13 +14,11 @@ reports_bp = Blueprint('reports', __name__)
 def sales_report(current_user):
     time_filter = request.args.get('time_filter', 'month')
     start_dt, end_dt = get_time_filter_ranges(time_filter, request.args.get('start_date'), request.args.get('end_date'))
-    branch_id = request.args.get('branch_id')
+    branch_id = resolve_branch_id(current_user, request.args.get('branch_id'))
 
     query = Sale.query.filter(Sale.status != 'refunded', Sale.archived_at == None)
-    if current_user.role != 'owner':
-        query = query.filter_by(branch_id=current_user.branch_id)
-    elif branch_id:
-        query = query.filter_by(branch_id=int(branch_id))
+    if branch_id:
+        query = query.filter_by(branch_id=branch_id)
     if start_dt and end_dt:
         query = query.filter(Sale.created_at >= start_dt, Sale.created_at <= end_dt)
 
@@ -50,7 +49,7 @@ def sales_report(current_user):
 def product_report(current_user):
     time_filter = request.args.get('time_filter', 'month')
     start_dt, end_dt = get_time_filter_ranges(time_filter, request.args.get('start_date'), request.args.get('end_date'))
-    branch_id = request.args.get('branch_id')
+    branch_id = resolve_branch_id(current_user, request.args.get('branch_id'))
 
     query = db.session.query(
         SaleItem.product_id,
@@ -58,10 +57,8 @@ def product_report(current_user):
         func.sum(SaleItem.subtotal).label('revenue'),
         func.sum(SaleItem.cost_price * SaleItem.quantity).label('cogs'),
     ).join(Sale).filter(Sale.status != 'refunded')
-    if current_user.role != 'owner':
-        query = query.filter(Sale.branch_id == current_user.branch_id)
-    elif branch_id:
-        query = query.filter(Sale.branch_id == int(branch_id))
+    if branch_id:
+        query = query.filter(Sale.branch_id == branch_id)
     if start_dt and end_dt:
         query = query.filter(Sale.created_at >= start_dt, Sale.created_at <= end_dt)
 
@@ -88,14 +85,15 @@ def product_report(current_user):
 def category_report(current_user):
     time_filter = request.args.get('time_filter', 'month')
     start_dt, end_dt = get_time_filter_ranges(time_filter, request.args.get('start_date'), request.args.get('end_date'))
+    branch_id = resolve_branch_id(current_user, request.args.get('branch_id'))
 
     query = db.session.query(
         Category.name,
         func.sum(SaleItem.subtotal).label('revenue'),
         func.sum(SaleItem.quantity).label('qty'),
     ).join(Product, Product.id == SaleItem.product_id).join(Category, Category.id == Product.category_id).join(Sale).filter(Sale.status != 'refunded')
-    if current_user.role != 'owner':
-        query = query.filter(Sale.branch_id == current_user.branch_id)
+    if branch_id:
+        query = query.filter(Sale.branch_id == branch_id)
     if start_dt and end_dt:
         query = query.filter(Sale.created_at >= start_dt, Sale.created_at <= end_dt)
 
@@ -107,10 +105,7 @@ def category_report(current_user):
 @token_required
 def inventory_valuation(current_user):
     branch_id = request.args.get('branch_id')
-    if current_user.role != 'owner':
-        branch_id = current_user.branch_id
-    elif branch_id:
-        branch_id = int(branch_id)
+    branch_id = resolve_branch_id(current_user, branch_id)
 
     query = ProductBatch.query.filter(ProductBatch.quantity > 0)
     if branch_id:

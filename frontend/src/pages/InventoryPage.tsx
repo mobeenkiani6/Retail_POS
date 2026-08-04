@@ -18,6 +18,8 @@ import { showToast } from '../components/Toast';
 import { useScanner } from '../hooks/useScanner';
 
 import { formatSkuLabel, type ProductSku } from '../utils/productSkus';
+import { getBranchId } from '../branch';
+import { useInventoryStore } from '../stores/inventoryStore';
 
 type Product = {
   id: number; name: string; category_name?: string; brand?: string;
@@ -163,16 +165,13 @@ function AdjustStockContent({
 
 export default function InventoryPage() {
   const { lastScannedBarcode, clearBarcode } = useScanner();
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
-  const branchId = parseInt(localStorage.getItem('active_branch_id') || user?.branch_id || '1', 10);
+  const branchId = getBranchId();
 
-  const [tab, setTab] = useState<'stock' | 'history' | 'alerts'>('stock');
+  const { tab, search, stockModalSkuId, setTab, setSearch, setStockModal } = useInventoryStore();
   const [products, setProducts] = useState<Product[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [movements, setMovements] = useState<Movement[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [stockModal, setStockModal] = useState<SkuRow | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -214,14 +213,17 @@ export default function InventoryPage() {
     })),
   );
 
-  const openStockModal = (row: SkuRow) => setStockModal(row);
+  const stockModal = stockModalSkuId != null
+    ? skuRows.find(s => s.id === stockModalSkuId) ?? null
+    : null;
+
+  const openStockModal = (row: SkuRow) => {
+    if (row.id != null) setStockModal(row.id, row.product_id);
+  };
 
   const adjustStock = async (skuId: number, productId: number, delta: number, reason = 'adjustment') => {
     await post('/inventory/adjust', { sku_id: skuId, product_id: productId, quantity_delta: delta, branch_id: branchId, reason });
     showToast('Stock updated', 'success');
-    setStockModal(prev => prev && prev.id === skuId
-      ? { ...prev, stock_level: (prev.stock_level ?? 0) + delta }
-      : prev);
     fetchData();
   };
 
@@ -371,14 +373,14 @@ export default function InventoryPage() {
         </div>
       )}
 
-      <Modal open={!!stockModal} onClose={() => setStockModal(null)} title="Adjust Stock" size="md">
-        {stockModal?.id && (
+      <Modal open={stockModalSkuId != null} onClose={() => setStockModal(null)} title="Adjust Stock" size="md">
+        {stockModal?.id != null && (
           <AdjustStockContent
             key={stockModal.id}
             row={stockModal}
             onAdjust={async (delta, reason) => {
               try {
-                await adjustStock(stockModal.id!, stockModal.product_id!, delta, reason);
+                await adjustStock(stockModal.id!, stockModal.product_id, delta, reason);
               } catch (e) {
                 showToast(getUserMessage(e), 'error');
                 throw e;

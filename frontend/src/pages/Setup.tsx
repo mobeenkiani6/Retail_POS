@@ -7,15 +7,16 @@ import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import log from '../utils/logger';
 import { post, getUserMessage } from '../api';
+import { getConfiguredBranchId, setActiveBranchId } from '../branch';
 
 type SetupResponse = {
   token: string;
-  user: { id: number; username: string; role: string; branch_id?: number; branch_name?: string };
+  user: { id: number; username: string; role: string; branch_id?: string; branch_name?: string };
 };
 
 const STEPS = [
   { id: 1, title: 'Owner Account', icon: User, desc: 'Create your administrator credentials' },
-  { id: 2, title: 'Store Details', icon: Building2, desc: 'Configure your first branch' },
+  { id: 2, title: 'Store Details', icon: Building2, desc: 'Configure this POS branch' },
   { id: 3, title: 'Review & Launch', icon: KeyRound, desc: 'Confirm and initialize' },
 ];
 
@@ -87,10 +88,14 @@ export default function Setup() {
         branch_name: formData.branch_name,
         branch_address: formData.branch_address,
         branch_phone: formData.branch_phone,
+        ...(getConfiguredBranchId() ? { branch_id: getConfiguredBranchId() } : {}),
       });
       log.info('Setup', 'System initialized', { userId: data?.user?.id });
       if (data?.token) localStorage.setItem('auth_token', data.token);
-      if (data?.user) localStorage.setItem('user', JSON.stringify(data.user));
+      if (data?.user) {
+        localStorage.setItem('user', JSON.stringify(data.user));
+        setActiveBranchId(data.user.branch_id);
+      }
       navigate('/operations');
     } catch (err) {
       setError(getUserMessage(err));

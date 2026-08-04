@@ -1,22 +1,18 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Loader2, X, Filter, Building2, Archive, ArchiveRestore } from 'lucide-react';
+import { Plus, Trash2, Edit2, Loader2, X, Building2, Archive, ArchiveRestore } from 'lucide-react';
 import { showToast } from '../Toast';
 import { showConfirm } from '../ConfirmDialog';
 import { get, post, put, patch, del, getUserMessage } from '../../api';
+import { getBranchId } from '../../branch';
 
 type User = {
   id: number;
   username: string;
   role: string;
-  branch_id: number | null;
+  branch_id: string | null;
   branch_name: string;
   created_at: string;
   archived_at?: string | null;
-};
-
-type Branch = {
-  id: number;
-  name: string;
 };
 
 export default function UsersSettings() {
@@ -24,38 +20,24 @@ export default function UsersSettings() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  
-  // Form State
+
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('cashier');
-  const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Filters & External Data
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [branchFilter, setBranchFilter] = useState<string>('all');
   const [includeArchived, setIncludeArchived] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const branchId = getBranchId();
 
   useEffect(() => {
     const userStr = localStorage.getItem('user');
     if (userStr) setCurrentUser(JSON.parse(userStr));
-    fetchBranches();
   }, []);
 
   useEffect(() => {
     fetchUsers();
   }, [includeArchived]);
-
-  const fetchBranches = async () => {
-    try {
-      const data = await get<Branch[]>('/branches/');
-      setBranches(Array.isArray(data) ? data : []);
-    } catch {
-      setBranches([]);
-    }
-  };
 
   const fetchUsers = async () => {
     try {
@@ -74,17 +56,13 @@ export default function UsersSettings() {
     if (user) {
       setEditingUser(user);
       setUsername(user.username);
-      setPassword(''); // Don't pre-fill password
+      setPassword('');
       setRole(user.role);
-      setSelectedBranchId(user.branch_id);
     } else {
       setEditingUser(null);
       setUsername('');
       setPassword('');
       setRole('cashier');
-      // Default to global switcher's branch, or currentUser's branch
-      const activeBranchId = localStorage.getItem('active_branch_id');
-      setSelectedBranchId(activeBranchId ? parseInt(activeBranchId) : (currentUser?.branch_id || null));
     }
     setModalOpen(true);
   };
@@ -102,10 +80,10 @@ export default function UsersSettings() {
 
     setSaving(true);
     try {
-      const payload: { username: string; role: string; branch_id: number | null; password?: string } = {
+      const payload: { username: string; role: string; branch_id: string | null; password?: string } = {
         username: username.trim(),
         role,
-        branch_id: selectedBranchId,
+        branch_id: branchId || null,
       };
       if (password) payload.password = password;
 
@@ -125,8 +103,15 @@ export default function UsersSettings() {
   };
 
   const handleArchiveUser = async (user: User) => {
+    const confirmed = await showConfirm({
+      title: 'Archive user?',
+      message: `${user.username} will be archived and cannot sign in.`,
+      confirmLabel: 'Archive',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
     try {
-      await patch(`/users/${user.id}/archive`, null);
+      await patch(`/users/${user.id}/archive`, {});
       showToast('User archived', 'success');
       fetchUsers();
     } catch (e) {
@@ -136,7 +121,7 @@ export default function UsersSettings() {
 
   const handleRestoreUser = async (user: User) => {
     try {
-      await patch(`/users/${user.id}/unarchive`, null);
+      await patch(`/users/${user.id}/unarchive`, {});
       showToast('User restored', 'success');
       fetchUsers();
     } catch (e) {
@@ -146,11 +131,11 @@ export default function UsersSettings() {
 
   const handleDeleteUser = async (user: User) => {
     const confirmed = await showConfirm({
-      title: 'Permanently delete user?',
+      title: 'Delete user permanently?',
       message: `${user.username} will be removed. They will no longer be able to sign in.`,
       relatedEffects: ['Cannot delete a user who has transactions. Archive them instead if needed.'],
       confirmLabel: 'Delete permanently',
-      variant: 'danger'
+      variant: 'danger',
     });
     if (!confirmed) return;
     try {
@@ -162,43 +147,21 @@ export default function UsersSettings() {
     }
   };
 
-  const filteredUsers = users.filter(user => {
-    if (branchFilter === 'all') return true;
-    if (branchFilter === 'global') return user.branch_id == null;
-    return user.branch_id === parseInt(branchFilter);
-  });
-
   return (
     <div className="max-w-6xl">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
         <div>
           <h3 className="text-2xl font-bold text-foreground">User Management</h3>
-          <p className="text-sm text-muted mt-1">Manage staff access, roles, and branch assignments.</p>
+          <p className="text-sm text-muted mt-1">Staff for this branch. All users are scoped to the POS branch id.</p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <label className="flex items-center gap-2 cursor-pointer select-none text-sm font-medium text-foreground-secondary">
             <input type="checkbox" checked={includeArchived} onChange={() => setIncludeArchived(v => !v)} className="rounded border-border text-accent-600 focus:ring-accent-500" />
             Include archived
           </label>
-          <div className="relative group">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-muted">
-              <Filter className="w-4 h-4" />
-            </div>
-            <select
-              value={branchFilter}
-              onChange={(e) => setBranchFilter(e.target.value)}
-              className="pl-10 pr-4 py-2 bg-surface border border-border rounded-lg text-sm font-medium text-foreground-secondary focus:ring-2 focus:ring-accent-500 focus:outline-none appearance-none cursor-pointer hover:border-border transition-colors shadow-sm min-w-[160px]"
-            >
-              <option value="all">All Branches</option>
-              <option value="global">Global Users</option>
-              {branches.map(b => (
-                <option key={b.id} value={b.id}>{b.name}</option>
-              ))}
-            </select>
-          </div>
           <button
             onClick={() => openModal()}
-            className="flex items-center gap-2 bg-accent-600 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-accent-600 transition-colors shadow-sm"
+            className="flex items-center gap-2 bg-accent-600 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-accent-700 transition-colors shadow-sm"
           >
             <Plus className="w-4 h-4" /> Add User
           </button>
@@ -225,7 +188,7 @@ export default function UsersSettings() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filteredUsers.map((user) => (
+              {users.map((user) => (
                 <tr key={user.id} className={`hover:bg-canvas-subtle transition-colors ${user.archived_at ? 'bg-canvas-subtle/70 opacity-90' : ''}`}>
                   <td className="px-6 py-4 font-medium text-foreground">
                     {user.username}
@@ -234,7 +197,7 @@ export default function UsersSettings() {
                   <td className="px-6 py-4">
                     <span className="flex items-center gap-1.5 text-sm text-muted">
                       <Building2 className="w-3.5 h-3.5" />
-                      {user.branch_name || 'Global'}
+                      {user.branch_name || '—'}
                     </span>
                   </td>
                   <td className="px-6 py-4">
@@ -294,97 +257,63 @@ export default function UsersSettings() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-foreground-secondary mb-1">Username</label>
                 <input
                   type="text"
-                  inputMode="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full px-4 py-2 bg-canvas-subtle border border-border rounded-lg focus:ring-2 focus:ring-accent-500 focus:outline-none"
                   placeholder="e.g. jsmith"
                 />
               </div>
-              
+
               <div>
                 <label className="block text-sm font-medium text-foreground-secondary mb-1">Password {editingUser && '(Leave blank to keep)'}</label>
                 <input
                   type="password"
-                  inputMode="text"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full px-4 py-2 bg-canvas-subtle border border-border rounded-lg focus:ring-2 focus:ring-accent-500 focus:outline-none"
                   placeholder="••••••••"
                 />
               </div>
-              
+
               <div>
                 <label className="block text-sm font-medium text-foreground-secondary mb-1">Role</label>
                 {editingUser?.role === 'owner' ? (
                   <>
-                    <input
-                      type="text"
-                      value="Owner"
-                      disabled
-                      className="w-full px-4 py-2 bg-canvas-subtle border border-border rounded-lg text-muted cursor-not-allowed"
-                    />
-                    <p className="mt-1 text-xs text-muted">
-                      Owner role cannot be changed.
-                    </p>
+                    <input type="text" value="Owner" disabled className="w-full px-4 py-2 bg-canvas-subtle border border-border rounded-lg text-muted cursor-not-allowed" />
+                    <p className="mt-1 text-xs text-muted">Owner role cannot be changed.</p>
                   </>
                 ) : (
-                  <>
-                    <select
-                      value={role}
-                      onChange={(e) => setRole(e.target.value)}
-                      className="w-full px-4 py-2 bg-canvas-subtle border border-border rounded-lg focus:ring-2 focus:ring-accent-500 focus:outline-none"
-                    >
-                      <option value="manager">Manager</option>
-                      <option value="cashier">Cashier</option>
-                      <option value="inventory_manager">Inventory Manager</option>
-                    </select>
-                    <p className="mt-1 text-xs text-muted">
-                      Select the level of access to grant this user.
-                    </p>
-                  </>
+                  <select
+                    value={role}
+                    onChange={(e) => setRole(e.target.value)}
+                    className="w-full px-4 py-2 bg-canvas-subtle border border-border rounded-lg focus:ring-2 focus:ring-accent-500 focus:outline-none"
+                  >
+                    <option value="manager">Manager</option>
+                    <option value="cashier">Cashier</option>
+                    <option value="inventory_manager">Inventory Manager</option>
+                  </select>
                 )}
               </div>
 
-              {/* Branch Assignment - Visible only to Owners */}
-              {currentUser?.role === 'owner' && (
-                <div>
-                  <label className="block text-sm font-medium text-foreground-secondary mb-1">Branch Assignment</label>
-                  <select
-                    value={selectedBranchId || 'global'}
-                    onChange={(e) => setSelectedBranchId(e.target.value === 'global' ? null : parseInt(e.target.value))}
-                    className="w-full px-4 py-2 bg-canvas-subtle border border-border rounded-lg focus:ring-2 focus:ring-accent-500 focus:outline-none"
-                  >
-                    <option value="global">Global (No Branch)</option>
-                    {branches.map(b => (
-                      <option key={b.id} value={b.id}>{b.name}</option>
-                    ))}
-                  </select>
-                  <p className="mt-1 text-xs text-muted">
-                    Assign this user to a specific branch or keep them universal.
-                  </p>
-                </div>
-              )}
+              <p className="text-xs text-muted">
+                Users are assigned to this POS branch automatically{branchId ? ` (${branchId.slice(0, 8)}…)` : ''}.
+              </p>
             </div>
 
             <div className="px-6 py-4 bg-canvas-subtle border-t border-border flex justify-end gap-3 rounded-b-2xl">
-              <button
-                onClick={closeModal}
-                className="px-4 py-2 text-foreground-secondary font-medium hover:bg-neutral-200 dark:bg-neutral-700 rounded-lg transition-colors"
-                disabled={saving}
-              >
+              <button onClick={closeModal} className="px-4 py-2 text-foreground-secondary font-medium hover:bg-neutral-200 dark:bg-neutral-700 rounded-lg transition-colors" disabled={saving}>
                 Cancel
               </button>
               <button
                 onClick={handleSaveUser}
                 disabled={saving || !username.trim()}
-                className="flex items-center gap-2 bg-accent-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-accent-600 disabled:opacity-50 transition-colors"
+                className="flex items-center gap-2 bg-accent-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-accent-700 disabled:opacity-50 transition-colors"
               >
                 {saving && <Loader2 className="w-4 h-4 animate-spin" />}
                 {editingUser ? 'Save Changes' : 'Create User'}

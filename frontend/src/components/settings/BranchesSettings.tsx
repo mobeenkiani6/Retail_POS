@@ -1,52 +1,43 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Loader2, X, ChevronDown, ChevronRight, MapPin, Phone, Users, Archive, ArchiveRestore } from 'lucide-react';
+import { Loader2, MapPin, Phone, Copy, Check, Building2 } from 'lucide-react';
 import { showToast } from '../Toast';
-import { showConfirm } from '../ConfirmDialog';
-import BranchSwitcher from '../BranchSwitcher';
-import { get, post, put, patch, del, getUserMessage } from '../../api';
+import { get, put, getUserMessage } from '../../api';
+import { getBranchId, setActiveBranchId } from '../../branch';
 
 type Branch = {
-  id: number;
+  id: string;
   name: string;
   address: string;
   phone: string;
   user_count: number;
-  archived_at?: string | null;
-};
-
-type BranchUser = {
-  id: number;
-  username: string;
-  role: string;
-  created_at: string;
 };
 
 export default function BranchesSettings() {
-  const [branches, setBranches] = useState<Branch[]>([]);
+  const [branch, setBranch] = useState<Branch | null>(null);
   const [loading, setLoading] = useState(true);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
-  const [expandedBranch, setExpandedBranch] = useState<number | null>(null);
-  const [branchUsers, setBranchUsers] = useState<BranchUser[]>([]);
-  const [usersLoading, setUsersLoading] = useState(false);
-  const [includeArchived, setIncludeArchived] = useState(false);
-
-  // Form state
+  const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetchBranches();
-  }, [includeArchived]);
+    fetchBranch();
+  }, []);
 
-  const fetchBranches = async () => {
+  const fetchBranch = async () => {
     try {
       setLoading(true);
-      const query = includeArchived ? '?include_archived=1' : '';
-      const data = await get<Branch[]>(`/branches/${query}`);
-      setBranches(Array.isArray(data) ? data : []);
+      const data = await get<Branch[]>('/branches/');
+      const list = Array.isArray(data) ? data : [];
+      const b = list[0] || null;
+      setBranch(b);
+      if (b) {
+        setName(b.name);
+        setAddress(b.address || '');
+        setPhone(b.phone || '');
+        setActiveBranchId(b.id);
+      }
     } catch (e) {
       showToast(getUserMessage(e), 'error');
     } finally {
@@ -54,65 +45,20 @@ export default function BranchesSettings() {
     }
   };
 
-  const fetchBranchUsers = async (branchId: number) => {
-    try {
-      setUsersLoading(true);
-      const data = await get<BranchUser[]>(`/branches/${branchId}/users`);
-      setBranchUsers(Array.isArray(data) ? data : []);
-    } catch (e) {
-      showToast(getUserMessage(e), 'error');
-    } finally {
-      setUsersLoading(false);
-    }
-  };
-
-  const toggleExpand = (branchId: number) => {
-    if (expandedBranch === branchId) {
-      setExpandedBranch(null);
-      setBranchUsers([]);
-    } else {
-      setExpandedBranch(branchId);
-      fetchBranchUsers(branchId);
-    }
-  };
-
-  const openModal = (branch?: Branch) => {
-    if (branch) {
-      setEditingBranch(branch);
-      setName(branch.name);
-      setAddress(branch.address);
-      setPhone(branch.phone);
-    } else {
-      setEditingBranch(null);
-      setName('');
-      setAddress('');
-      setPhone('');
-    }
-    setModalOpen(true);
-  };
-
-  const closeModal = () => {
-    setModalOpen(false);
-    setEditingBranch(null);
-  };
-
   const handleSave = async () => {
-    if (!name.trim()) {
-      showToast('Branch name is required.', 'error');
+    if (!branch || !name.trim()) {
+      showToast('Branch name is required', 'error');
       return;
     }
-
     setSaving(true);
     try {
-      const body = { name: name.trim(), address: address.trim(), phone: phone.trim() };
-      if (editingBranch) {
-        await put(`/branches/${editingBranch.id}`, body);
-      } else {
-        await post('/branches/', body);
-      }
-      showToast(editingBranch ? 'Branch updated' : 'Branch created', 'success');
-      closeModal();
-      fetchBranches();
+      await put(`/branches/${branch.id}`, {
+        name: name.trim(),
+        address: address.trim(),
+        phone: phone.trim(),
+      });
+      showToast('Branch updated', 'success');
+      fetchBranch();
     } catch (e) {
       showToast(getUserMessage(e), 'error');
     } finally {
@@ -120,272 +66,115 @@ export default function BranchesSettings() {
     }
   };
 
-  const handleArchive = async (branch: Branch) => {
+  const copyId = async () => {
+    const id = branch?.id || getBranchId();
+    if (!id) return;
     try {
-      await patch(`/branches/${branch.id}/archive`, null);
-      showToast('Branch archived', 'success');
-      if (expandedBranch === branch.id) setExpandedBranch(null);
-      fetchBranches();
-    } catch (e) {
-      showToast(getUserMessage(e), 'error');
+      await navigator.clipboard.writeText(id);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      showToast('Could not copy branch ID', 'error');
     }
   };
 
-  const handleRestore = async (branch: Branch) => {
-    try {
-      await patch(`/branches/${branch.id}/unarchive`, null);
-      showToast('Branch restored', 'success');
-      fetchBranches();
-    } catch (e) {
-      showToast(getUserMessage(e), 'error');
-    }
-  };
-
-  const handleDelete = async (branch: Branch) => {
-    const hasUsersOrInventory = branch.user_count > 0;
-    const confirmed = await showConfirm({
-      title: hasUsersOrInventory ? 'Permanent delete with cascade?' : 'Permanently delete branch?',
-      message: hasUsersOrInventory
-        ? `"${branch.name}" has ${branch.user_count} user(s), inventory, and possibly sales. Permanently deleting will reassign users (to no branch), delete all inventory and sales for this branch, then remove the branch. This cannot be undone.`
-        : `"${branch.name}" will be removed forever. This cannot be undone.`,
-      relatedEffects: hasUsersOrInventory
-        ? ['Users will be unassigned from this branch.', 'All inventory records for this branch will be deleted.', 'All transactions for this branch will be deleted.']
-        : undefined,
-      confirmLabel: 'Delete permanently',
-      variant: 'danger'
-    });
-    if (!confirmed) return;
-    try {
-      const url = hasUsersOrInventory ? `/branches/${branch.id}?cascade=1` : `/branches/${branch.id}`;
-      await del(url);
-      showToast('Branch deleted permanently', 'success');
-      if (expandedBranch === branch.id) setExpandedBranch(null);
-      fetchBranches();
-    } catch (e) {
-      showToast(getUserMessage(e), 'error');
-    }
-  };
-
-  const roleBadge = (role: string) => {
-    const styles = role === 'owner'
-      ? 'bg-accent-500/10 text-accent-600 border-accent-500/30'
-      : role === 'manager'
-        ? 'bg-amber-50 text-amber-700 border-amber-200'
-        : 'bg-canvas-subtle text-foreground-secondary border-border';
+  if (loading) {
     return (
-      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize border ${styles}`}>
-        {role}
-      </span>
+      <div className="flex justify-center p-12 text-muted">
+        <Loader2 className="w-6 h-6 animate-spin" />
+      </div>
     );
-  };
+  }
+
+  if (!branch) {
+    return (
+      <div className="max-w-2xl rounded-2xl border border-dashed border-border p-8 text-center text-muted">
+        No branch found for this POS. Complete setup or set <code className="text-foreground">BRANCH_ID</code> to
+        the admin-panel hex id.
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-4xl">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h3 className="text-2xl font-bold text-foreground">Branch Management</h3>
-          <p className="text-sm text-muted mt-1">Manage store locations and view assigned staff.</p>
-        </div>
-        <div className="flex items-center gap-4 flex-wrap">
-          <label className="flex items-center gap-2 cursor-pointer select-none text-sm font-medium text-foreground-secondary">
-            <input type="checkbox" checked={includeArchived} onChange={() => setIncludeArchived(v => !v)} className="rounded border-border text-accent-600 focus:ring-accent-500" />
-            Include archived
-          </label>
-          {/* Active Branch Switching Control */}
-          <div className="w-56">
-            <BranchSwitcher />
+    <div className="max-w-2xl space-y-6">
+      <div>
+        <h3 className="text-2xl font-bold text-foreground">This Branch</h3>
+        <p className="text-sm text-muted mt-1">
+          This POS is single-branch scoped. The hex ID below links it to the admin panel.
+        </p>
+      </div>
+
+      <div className="surface-card p-6 space-y-5">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-accent-500/10 text-accent-600 flex items-center justify-center shrink-0">
+            <Building2 className="w-5 h-5" />
           </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted mb-1">Branch ID (hex)</p>
+            <div className="flex items-center gap-2">
+              <code className="text-sm font-mono text-foreground truncate">{branch.id}</code>
+              <button
+                type="button"
+                onClick={copyId}
+                className="p-1.5 rounded-lg text-muted hover:text-accent-600 hover:bg-accent-500/10 transition-colors"
+                title="Copy branch ID"
+              >
+                {copied ? <Check className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4" />}
+              </button>
+            </div>
+            <p className="text-xs text-muted mt-1">{branch.user_count} user(s) assigned</p>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-foreground-secondary mb-1">Name</label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="input-base"
+            placeholder="Store name"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-foreground-secondary mb-1">
+            <span className="inline-flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5" /> Address</span>
+          </label>
+          <input
+            type="text"
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            className="input-base"
+            placeholder="Street, city"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-foreground-secondary mb-1">
+            <span className="inline-flex items-center gap-1.5"><Phone className="w-3.5 h-3.5" /> Phone</span>
+          </label>
+          <input
+            type="text"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            className="input-base"
+            placeholder="+92 …"
+          />
+        </div>
+
+        <div className="flex justify-end pt-2">
           <button
-            onClick={() => openModal()}
-            className="flex items-center gap-2 bg-accent-600 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-accent-600 transition-colors shrink-0"
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-2 bg-accent-600 text-white px-5 py-2.5 rounded-xl font-medium hover:bg-accent-700 disabled:opacity-50 transition-colors"
           >
-            <Plus className="w-4 h-4" /> Add Branch
+            {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+            Save changes
           </button>
         </div>
       </div>
-
-      {/* Branch List */}
-      <div className="bg-surface rounded-xl border border-border overflow-hidden">
-        {loading ? (
-          <div className="p-8 flex justify-center text-muted">
-            <Loader2 className="w-6 h-6 animate-spin" />
-          </div>
-        ) : branches.length === 0 ? (
-          <div className="p-8 text-center text-muted border border-dashed border-border m-4 rounded-xl">
-            No branches found. Create your first branch above.
-          </div>
-        ) : (
-          <div className="divide-y divide-border">
-            {branches.map((branch) => (
-              <div key={branch.id}>
-                {/* Branch Row */}
-                <div className={`flex items-center gap-4 px-6 py-4 hover:bg-canvas-subtle/50 transition-colors ${branch.archived_at ? 'bg-canvas-subtle/70 opacity-90' : ''}`}>
-                  {/* Expand Toggle */}
-                  <button
-                    onClick={() => toggleExpand(branch.id)}
-                    className="p-1 text-muted hover:text-foreground-secondary transition-colors rounded-md hover:bg-canvas-subtle"
-                    title="View users"
-                  >
-                    {expandedBranch === branch.id
-                      ? <ChevronDown className="w-4 h-4" />
-                      : <ChevronRight className="w-4 h-4" />
-                    }
-                  </button>
-
-                  {/* Branch Info */}
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-foreground truncate">
-                      {branch.name}
-                      {branch.archived_at && <span className="ml-2 text-xs font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded border border-amber-200">Archived</span>}
-                    </p>
-                    <div className="flex items-center gap-4 mt-0.5 text-xs text-muted">
-                      {branch.address && (
-                        <span className="flex items-center gap-1 truncate">
-                          <MapPin className="w-3 h-3 shrink-0" /> {branch.address}
-                        </span>
-                      )}
-                      {branch.phone && (
-                        <span className="flex items-center gap-1">
-                          <Phone className="w-3 h-3 shrink-0" /> {branch.phone}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* User Count Badge */}
-                  <span className="flex items-center gap-1.5 text-xs font-medium text-muted bg-canvas-subtle px-2.5 py-1 rounded-full border border-border">
-                    <Users className="w-3.5 h-3.5" />
-                    {branch.user_count}
-                  </span>
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-1">
-                    {!branch.archived_at && (
-                      <button onClick={() => openModal(branch)} className="p-1.5 text-muted hover:text-accent-600 hover:bg-accent-500/10 rounded transition-colors" title="Edit Branch">
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                    )}
-                    {branch.archived_at ? (
-                      <>
-                        <button onClick={() => handleRestore(branch)} className="p-1.5 text-muted hover:text-emerald-600 hover:bg-emerald-50 rounded transition-colors" title="Restore">
-                          <ArchiveRestore className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => handleDelete(branch)} className="p-1.5 text-muted hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="Delete permanently">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button onClick={() => handleArchive(branch)} className="p-1.5 text-muted hover:text-amber-600 hover:bg-amber-50 rounded transition-colors" title="Archive">
-                          <Archive className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => handleDelete(branch)} className="p-1.5 text-muted hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="Delete permanently">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {/* Expanded Users Panel */}
-                {expandedBranch === branch.id && (
-                  <div className="bg-canvas-subtle/70 border-t border-border px-6 py-4 ml-10">
-                    <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-3">
-                      Assigned Users ({branch.user_count})
-                    </h4>
-                    {usersLoading ? (
-                      <div className="flex items-center gap-2 text-muted text-sm py-2">
-                        <Loader2 className="w-4 h-4 animate-spin" /> Loading…
-                      </div>
-                    ) : branchUsers.length === 0 ? (
-                      <p className="text-sm text-muted italic">No users assigned to this branch.</p>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {branchUsers.map((u) => (
-                          <div key={u.id} className="flex items-center justify-between bg-surface px-4 py-2.5 rounded-lg border border-border">
-                            <span className="text-sm font-medium text-foreground-secondary">{u.username}</span>
-                            {roleBadge(u.role)}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Create / Edit Modal */}
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-surface rounded-2xl shadow-xl w-full max-w-md animate-scale-in">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-              <h3 className="text-lg font-bold text-foreground">
-                {editingBranch ? 'Edit Branch' : 'New Branch'}
-              </h3>
-              <button onClick={closeModal} className="text-muted hover:text-muted p-1 rounded-lg hover:bg-canvas-subtle">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-foreground-secondary mb-1">Branch Name *</label>
-                <input
-                  type="text"
-                  inputMode="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full px-4 py-2 bg-canvas-subtle border border-border rounded-lg focus:ring-2 focus:ring-accent-500 focus:outline-none"
-                  placeholder="e.g. Downtown Store"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground-secondary mb-1">Address</label>
-                <input
-                  type="text"
-                  inputMode="text"
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  className="w-full px-4 py-2 bg-canvas-subtle border border-border rounded-lg focus:ring-2 focus:ring-accent-500 focus:outline-none"
-                  placeholder="123 Main St, City"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground-secondary mb-1">Phone</label>
-                <input
-                  type="text"
-                  inputMode="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  className="w-full px-4 py-2 bg-canvas-subtle border border-border rounded-lg focus:ring-2 focus:ring-accent-500 focus:outline-none"
-                  placeholder="+92 300 1234567"
-                />
-              </div>
-            </div>
-
-            <div className="px-6 py-4 bg-canvas-subtle border-t border-border flex justify-end gap-3 rounded-b-2xl">
-              <button
-                onClick={closeModal}
-                className="px-4 py-2 text-foreground-secondary font-medium hover:bg-neutral-200 dark:bg-neutral-700 rounded-lg transition-colors"
-                disabled={saving}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving || !name.trim()}
-                className="flex items-center gap-2 bg-accent-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-accent-600 disabled:opacity-50 transition-colors"
-              >
-                {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-                {editingBranch ? 'Save Changes' : 'Create Branch'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

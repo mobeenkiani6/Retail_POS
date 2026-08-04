@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from datetime import datetime
 from app.models import db, User
 from app.utils.auth_decorators import token_required, owner_required
+from app.branch_scope import resolve_branch_id
 from werkzeug.security import generate_password_hash
 
 users_bp = Blueprint('users', __name__)
@@ -12,7 +13,7 @@ def _user_to_dict(u):
         'username': u.username,
         'role': u.role,
         'branch_id': u.branch_id,
-        'branch_name': u.branch.name if u.branch else 'Global',
+        'branch_name': u.branch.name if u.branch else 'Unassigned',
         'created_at': u.created_at.isoformat() if u.created_at else None
     }
     if hasattr(u, 'archived_at') and u.archived_at:
@@ -43,8 +44,8 @@ def create_user(current_user):
         return jsonify({"message": "Username already exists."}), 400
         
     try:
-        # Owners can assign any branch, or no branch (global).
-        branch_id = data.get('branch_id', current_user.branch_id)
+        # Single-branch POS: always assign to this instance's branch UUID
+        branch_id = resolve_branch_id(current_user, data.get('branch_id')) or current_user.branch_id
 
         new_user = User(
             branch_id=branch_id,
@@ -79,10 +80,7 @@ def update_user(current_user, user_id):
     if not user:
         return jsonify({"message": "User not found"}), 404
         
-    # Owners have full permission to update users
-        
     try:
-        # Prevent demoting the last owner
         if 'role' in data and data['role'] != 'owner' and user.role == 'owner':
             owner_count = User.query.filter_by(branch_id=user.branch_id, role='owner').count()
             if owner_count <= 1:
@@ -100,7 +98,8 @@ def update_user(current_user, user_id):
             user.role = data['role']
 
         if 'branch_id' in data:
-            user.branch_id = data['branch_id']
+            # Keep users on this POS branch UUID (ignore cross-branch assignment)
+            user.branch_id = resolve_branch_id(current_user, data.get('branch_id')) or user.branch_id
             
         db.session.commit()
         return jsonify({"message": "User updated successfully"}), 200

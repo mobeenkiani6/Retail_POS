@@ -197,7 +197,7 @@ export function productToForm(p: Record<string, unknown>): ProductFormData {
   };
 }
 
-export function formToPayload(form: ProductFormData, branchId?: number) {
+export function formToPayload(form: ProductFormData, branchId?: string) {
   return {
     name: form.name.trim(),
     description: form.description.trim() || null,

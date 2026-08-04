@@ -66,7 +66,7 @@ export default function AuthLayout({ children, title, subtitle, badge }: AuthLay
           <div className="space-y-4">
             {[
               { label: 'FEFO batch tracking', desc: 'Expiry-aware inventory management' },
-              { label: 'Multi-branch support', desc: 'Centralized control, local operations' },
+              { label: 'Single-branch scope', desc: 'Hex ID linked to your admin panel' },
               { label: 'Real-time analytics', desc: 'Sales, margins, and health metrics' },
             ].map((item, i) => (
               <motion.div

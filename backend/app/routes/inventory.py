@@ -7,20 +7,19 @@ from app.services.stock_service import (
     adjust_stock, get_stock_map, MOVEMENT_REASONS, migrate_batches_to_inventory,
 )
 from app.errors import error_response
+from app.branch_scope import resolve_branch_id, require_branch_id
 
 inventory_bp = Blueprint('inventory', __name__)
 
 
 def _resolve_branch(current_user, branch_id=None):
-    if current_user.role != 'owner':
-        return current_user.branch_id
-    return branch_id or current_user.branch_id or 1
+    return resolve_branch_id(current_user, branch_id) or require_branch_id(current_user)
 
 
 @inventory_bp.route('/', methods=['GET'])
 @token_required
 def get_inventory(current_user):
-    branch_id = _resolve_branch(current_user, request.args.get('branch_id', type=int))
+    branch_id = _resolve_branch(current_user, request.args.get('branch_id'))
     migrate_batches_to_inventory(db.session)
     totals, variants, sku_totals = get_stock_map(branch_id)
     return jsonify({
@@ -34,7 +33,7 @@ def get_inventory(current_user):
 @inventory_bp.route('/summary', methods=['GET'])
 @token_required
 def inventory_summary(current_user):
-    branch_id = _resolve_branch(current_user, request.args.get('branch_id', type=int))
+    branch_id = _resolve_branch(current_user, request.args.get('branch_id'))
     rows = (
         db.session.query(Inventory, ProductSku, Product)
         .outerjoin(ProductSku, Inventory.sku_id == ProductSku.id)
@@ -83,7 +82,7 @@ def inventory_summary(current_user):
 @inventory_bp.route('/movements', methods=['GET'])
 @token_required
 def list_movements(current_user):
-    branch_id = _resolve_branch(current_user, request.args.get('branch_id', type=int))
+    branch_id = _resolve_branch(current_user, request.args.get('branch_id'))
     reason = request.args.get('reason') or request.args.get('movement_type')
     product_id = request.args.get('product_id', type=int)
     time_filter = request.args.get('time_filter', 'week')

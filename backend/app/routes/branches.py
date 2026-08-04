@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
-from app.models import db, Branch, User, ProductBatch, Sale, Setting
+from app.models import db, Branch, User
+from app.branch_scope import get_configured_branch_id, is_valid_branch_id
 from app.utils.auth_decorators import token_required, owner_required
 
 branches_bp = Blueprint('branches', __name__)
@@ -13,71 +14,67 @@ def _branch_to_dict(b):
         'address': b.address or '',
         'phone': b.phone or '',
         'user_count': len(b.users),
-        'created_at': b.created_at.isoformat() if b.created_at else None
+        'created_at': b.created_at.isoformat() if b.created_at else None,
+        'single_branch': True,
     }
     if hasattr(b, 'archived_at') and b.archived_at:
         d['archived_at'] = b.archived_at.isoformat()
     return d
 
 
+def _scoped_branch():
+    """Return the single branch for this POS instance, or None."""
+    configured = None
+    try:
+        configured = get_configured_branch_id()
+    except ValueError:
+        configured = None
+    if configured:
+        return Branch.query.get(configured)
+    # Fall back to earliest active branch (setup may have created one UUID without env)
+    return (
+        Branch.query.filter(Branch.archived_at == None)
+        .order_by(Branch.created_at.asc())
+        .first()
+    )
+
+
 @branches_bp.route('/', methods=['GET'])
 @token_required
 def get_branches(current_user):
-    """List all branches with user count. Use include_archived=1 to include archived."""
-    include_archived = request.args.get('include_archived', '').lower() in ('1', 'true', 'yes')
-    query = Branch.query.order_by(Branch.created_at.asc())
-    if not include_archived and hasattr(Branch, 'archived_at'):
-        query = query.filter(Branch.archived_at == None)
-    branches = query.all()
-    output = [_branch_to_dict(b) for b in branches]
-    return jsonify(output), 200
+    """Return this POS's single branch (UUID-scoped)."""
+    branch = _scoped_branch()
+    if not branch and current_user.branch_id:
+        branch = Branch.query.get(current_user.branch_id)
+    if not branch:
+        return jsonify([]), 200
+    return jsonify([_branch_to_dict(branch)]), 200
 
 
 @branches_bp.route('/', methods=['POST'])
 @token_required
 @owner_required
 def create_branch(current_user):
-    """Create a new branch."""
-    data = request.get_json()
-    if not data or not data.get('name', '').strip():
-        return jsonify({'message': 'Branch name is required'}), 400
-
-    # Check for duplicate name
-    existing = Branch.query.filter(
-        db.func.lower(Branch.name) == data['name'].strip().lower()
-    ).first()
-    if existing:
-        return jsonify({'message': 'A branch with that name already exists'}), 409
-
-    try:
-        branch = Branch(
-            name=data['name'].strip(),
-            address=data.get('address', '').strip(),
-            phone=data.get('phone', '').strip()
+    """Multi-branch create is disabled — this POS is single-branch scoped."""
+    return jsonify({
+        'message': (
+            'This POS is single-branch scoped. Create additional branches in the '
+            'admin panel; provision each store with its own BRANCH_ID hex id.'
         )
-        db.session.add(branch)
-        db.session.commit()
-        return jsonify({
-            'id': branch.id,
-            'name': branch.name,
-            'address': branch.address,
-            'phone': branch.phone,
-            'user_count': 0,
-            'message': 'Branch created successfully'
-        }), 201
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'message': f'Error creating branch: {str(e)}'}), 500
+    }), 403
 
 
-@branches_bp.route('/<int:branch_id>', methods=['PUT'])
+@branches_bp.route('/<branch_id>', methods=['PUT'])
 @token_required
 @owner_required
 def update_branch(current_user, branch_id):
-    """Update an existing branch."""
-    branch = Branch.query.get(branch_id)
-    if not branch:
-        return jsonify({'message': 'Branch not found'}), 404
+    """Update the configured branch (name / address / phone)."""
+    if not is_valid_branch_id(branch_id):
+        return jsonify({'message': 'Invalid branch id'}), 400
+
+    scoped = _scoped_branch()
+    if not scoped or scoped.id != branch_id:
+        return jsonify({'message': 'Branch not found or not in scope for this POS'}), 404
 
     data = request.get_json()
     if not data:
@@ -87,24 +84,16 @@ def update_branch(current_user, branch_id):
     if not name:
         return jsonify({'message': 'Branch name is required'}), 400
 
-    # Check for duplicate name (excluding self)
-    existing = Branch.query.filter(
-        db.func.lower(Branch.name) == name.lower(),
-        Branch.id != branch_id
-    ).first()
-    if existing:
-        return jsonify({'message': 'A branch with that name already exists'}), 409
-
     try:
-        branch.name = name
-        branch.address = data.get('address', branch.address or '').strip()
-        branch.phone = data.get('phone', branch.phone or '').strip()
+        scoped.name = name
+        scoped.address = data.get('address', scoped.address or '').strip()
+        scoped.phone = data.get('phone', scoped.phone or '').strip()
         db.session.commit()
         return jsonify({
-            'id': branch.id,
-            'name': branch.name,
-            'address': branch.address,
-            'phone': branch.phone,
+            'id': scoped.id,
+            'name': scoped.name,
+            'address': scoped.address,
+            'phone': scoped.phone,
             'message': 'Branch updated successfully'
         }), 200
     except Exception as e:
@@ -112,105 +101,47 @@ def update_branch(current_user, branch_id):
         return jsonify({'message': f'Error updating branch: {str(e)}'}), 500
 
 
-@branches_bp.route('/<int:branch_id>/archive', methods=['PATCH'])
+@branches_bp.route('/<branch_id>/archive', methods=['PATCH'])
 @token_required
 @owner_required
 def archive_branch(current_user, branch_id):
-    branch = Branch.query.get_or_404(branch_id)
-    if not hasattr(branch, 'archived_at'):
-        return jsonify({'message': 'Archive not supported'}), 400
-    try:
-        branch.archived_at = datetime.utcnow()
-        db.session.commit()
-        return jsonify({'message': 'Branch archived', 'archived_at': branch.archived_at.isoformat()}), 200
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'message': str(e)}), 500
+    return jsonify({
+        'message': 'Archiving the branch is disabled on a single-branch POS.'
+    }), 403
 
-@branches_bp.route('/<int:branch_id>/unarchive', methods=['PATCH'])
+
+@branches_bp.route('/<branch_id>/unarchive', methods=['PATCH'])
 @token_required
 @owner_required
 def unarchive_branch(current_user, branch_id):
-    branch = Branch.query.get_or_404(branch_id)
-    if not hasattr(branch, 'archived_at'):
-        return jsonify({'message': 'Unarchive not supported'}), 400
-    try:
-        branch.archived_at = None
-        db.session.commit()
-        return jsonify({'message': 'Branch restored'}), 200
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'message': str(e)}), 500
+    return jsonify({
+        'message': 'Unarchive is disabled on a single-branch POS.'
+    }), 403
 
-@branches_bp.route('/<int:branch_id>', methods=['DELETE'])
+
+@branches_bp.route('/<branch_id>', methods=['DELETE'])
 @token_required
 @owner_required
 def delete_branch(current_user, branch_id):
-    """Permanent delete. If cascade=1, reassigns users and deletes inventory, sales, settings, then branch.
-    Otherwise blocked if users or inventory exist."""
-    branch = Branch.query.get(branch_id)
-    if not branch:
-        return jsonify({'message': 'Branch not found'}), 404
-
-    cascade = request.args.get('cascade', '').lower() in ('1', 'true', 'yes')
-
-    if cascade:
-        try:
-            users_count = len(branch.users)
-            inv_count = ProductBatch.query.filter_by(branch_id=branch_id).count()
-            sales_count = Sale.query.filter_by(branch_id=branch_id).count()
-            setting = Setting.query.filter_by(branch_id=branch_id).first()
-
-            for u in branch.users:
-                u.branch_id = None
-            ProductBatch.query.filter_by(branch_id=branch_id).delete()
-            for sale in Sale.query.filter_by(branch_id=branch_id).all():
-                db.session.delete(sale)
-            if setting:
-                db.session.delete(setting)
-            db.session.delete(branch)
-            db.session.commit()
-            return jsonify({
-                'message': 'Branch permanently deleted.',
-                'related_deleted': {
-                    'users_reassigned': users_count,
-                    'batch_rows': inv_count,
-                    'sales': sales_count,
-                    'settings': 1 if setting else 0
-                }
-            }), 200
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'message': f'Error deleting branch: {str(e)}'}), 500
-    else:
-        if len(branch.users) > 0:
-            return jsonify({
-                'message': f'Cannot delete branch "{branch.name}" — it has {len(branch.users)} user(s). Reassign them or use permanent delete with cascade.'
-            }), 409
-        if len(branch.batches) > 0:
-            return jsonify({
-                'message': f'Cannot delete branch "{branch.name}" — it has batch inventory. Use permanent delete with cascade to remove everything.'
-            }), 409
-        try:
-            setting = Setting.query.filter_by(branch_id=branch_id).first()
-            if setting:
-                db.session.delete(setting)
-            db.session.delete(branch)
-            db.session.commit()
-            return jsonify({'message': 'Branch deleted successfully'}), 200
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'message': str(e)}), 500
+    return jsonify({
+        'message': (
+            'Deleting the branch is disabled on a single-branch POS. '
+            'Manage branch lifecycle from the admin panel.'
+        )
+    }), 403
 
 
-@branches_bp.route('/<int:branch_id>/users', methods=['GET'])
+@branches_bp.route('/<branch_id>/users', methods=['GET'])
 @token_required
 @owner_required
 def get_branch_users(current_user, branch_id):
-    """List users belonging to a specific branch."""
-    branch = Branch.query.get(branch_id)
-    if not branch:
-        return jsonify({'message': 'Branch not found'}), 404
+    """List users belonging to this POS branch."""
+    if not is_valid_branch_id(branch_id):
+        return jsonify({'message': 'Invalid branch id'}), 400
+
+    scoped = _scoped_branch()
+    if not scoped or scoped.id != branch_id:
+        return jsonify({'message': 'Branch not found or not in scope for this POS'}), 404
 
     users = User.query.filter_by(branch_id=branch_id).order_by(User.created_at.asc()).all()
     output = []

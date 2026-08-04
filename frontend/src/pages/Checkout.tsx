@@ -3,8 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useScanner } from '../hooks/useScanner';
 import {
   ShoppingBag, Plus, Minus, Trash2, Loader2, CreditCard, Banknote,
-  Wallet, Pause, Play, RotateCcw, Usb, User, Tag, Percent, StickyNote,
-  Eye, Smartphone, Split, X, Keyboard, ChevronDown,
+  Pause, Play, RotateCcw, Usb, User, Tag, Percent, StickyNote,
+  Eye, X, Keyboard, ChevronDown, Star,
 } from 'lucide-react';
 import { formatCurrency } from '../utils/formatCurrency';
 import { get, post, getUserMessage } from '../api';
@@ -16,6 +16,13 @@ import Modal from '../components/ui/Modal';
 import Input from '../components/ui/Input';
 import SearchInput from '../components/ui/SearchInput';
 import { formatSkuLabel, priceRange, type ProductSku } from '../utils/productSkus';
+import { getBranchId } from '../branch';
+import {
+  useCheckoutStore,
+  type CartItem,
+  type HeldCart,
+  type PaymentMethod,
+} from '../stores/checkoutStore';
 
 type Product = {
   id: number; name: string; base_price?: number; cost_price?: number;
@@ -25,58 +32,62 @@ type Product = {
 };
 type Category = { id: number; name: string };
 type Customer = { id: number; name: string; phone?: string; loyalty_points?: number };
-type CartItem = {
-  uniqueId: string;
-  product_id: number;
-  sku_id?: number;
-  variant?: string;
-  title: string;
-  price: number;
-  original_price: number;
-  cost_price: number;
-  quantity: number;
-  voided?: boolean;
-};
 
 type ReceiptSnapshot = {
   items: CartItem[];
   subtotal: number;
   discountAmount: number;
+  loyaltyDiscount: number;
   taxAmount: number;
   total: number;
   saleId?: number;
 };
 
-const HELD_KEY = 'nycto_held_carts';
-const PAYMENT_METHODS = ['Cash', 'Card', 'UPI', 'Wallet', 'Split'] as const;
-type PaymentMethod = typeof PAYMENT_METHODS[number];
+const PAYMENT_METHODS: PaymentMethod[] = ['Cash', 'Card'];
 
 export default function Checkout() {
   const { lastScannedBarcode, clearBarcode, scannerStatus } = useScanner();
   const searchRef = useRef<HTMLInputElement>(null);
-  const [cart, setCart] = useState<CartItem[]>([]);
+
+  const cart = useCheckoutStore(s => s.cart);
+  const setCart = useCheckoutStore(s => s.setCart);
+  const paymentMethod = useCheckoutStore(s => s.paymentMethod);
+  const setPaymentMethod = useCheckoutStore(s => s.setPaymentMethod);
+  const returnMode = useCheckoutStore(s => s.returnMode);
+  const setReturnMode = useCheckoutStore(s => s.setReturnMode);
+  const selectedCustomer = useCheckoutStore(s => s.selectedCustomer);
+  const setSelectedCustomer = useCheckoutStore(s => s.setSelectedCustomer);
+  const discount = useCheckoutStore(s => s.discount);
+  const setDiscount = useCheckoutStore(s => s.setDiscount);
+  const loyaltyPointsToRedeem = useCheckoutStore(s => s.loyaltyPointsToRedeem);
+  const setLoyaltyPointsToRedeem = useCheckoutStore(s => s.setLoyaltyPointsToRedeem);
+  const couponCode = useCheckoutStore(s => s.couponCode);
+  const setCouponCode = useCheckoutStore(s => s.setCouponCode);
+  const saleNotes = useCheckoutStore(s => s.saleNotes);
+  const setSaleNotes = useCheckoutStore(s => s.setSaleNotes);
+  const cashReceived = useCheckoutStore(s => s.cashReceived);
+  const setCashReceived = useCheckoutStore(s => s.setCashReceived);
+  const activeCategory = useCheckoutStore(s => s.activeCategory);
+  const setActiveCategory = useCheckoutStore(s => s.setActiveCategory);
+  const searchQuery = useCheckoutStore(s => s.searchQuery);
+  const setSearchQuery = useCheckoutStore(s => s.setSearchQuery);
+  const activeHeldId = useCheckoutStore(s => s.activeHeldId);
+  const setActiveHeldId = useCheckoutStore(s => s.setActiveHeldId);
+  const heldCarts = useCheckoutStore(s => s.heldCarts);
+  const setHeldCarts = useCheckoutStore(s => s.setHeldCarts);
+  const clearSale = useCheckoutStore(s => s.clearSale);
+
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [activeCategory, setActiveCategory] = useState<number | 'all'>('all');
-  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Card');
   const [checkingOut, setCheckingOut] = useState(false);
-  const [returnMode, setReturnMode] = useState(false);
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [discount, setDiscount] = useState<{ type: 'percent' | 'fixed'; value: number; name: string } | null>(null);
-  const [couponCode, setCouponCode] = useState('');
-  const [saleNotes, setSaleNotes] = useState('');
   const [showReceipt, setShowReceipt] = useState(false);
   const [receiptSnapshot, setReceiptSnapshot] = useState<ReceiptSnapshot | null>(null);
-  const [activeHeldId, setActiveHeldId] = useState<number | null>(null);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [customerSearch, setCustomerSearch] = useState('');
   const [showDiscountModal, setShowDiscountModal] = useState(false);
   const [showHeldModal, setShowHeldModal] = useState(false);
-  const [heldCarts, setHeldCarts] = useState<{ id: number; cart: CartItem[]; savedAt: string; customer?: string }[]>([]);
-  const [cashReceived, setCashReceived] = useState('');
   const [taxRate, setTaxRate] = useState(0);
   const [discountPresets, setDiscountPresets] = useState<{ id: string; name: string; type: 'percent' | 'fixed'; value: number }[]>([]);
 
@@ -86,7 +97,7 @@ export default function Checkout() {
   const [cartSkuEdit, setCartSkuEdit] = useState<{ uniqueId: string; product: Product } | null>(null);
 
   const user = JSON.parse(localStorage.getItem('user') || '{}');
-  const branchId = localStorage.getItem('active_branch_id') || user?.branch_id || '1';
+  const branchId = getBranchId();
   const canOverridePrice = ['owner', 'manager'].includes(user?.role);
 
   const fetchData = useCallback(async () => {
@@ -150,7 +161,7 @@ export default function Checkout() {
       const result = await post<{
         sku_id?: number; product_id: number; product_name: string; display_label?: string;
         unit_price: number; cost_price: number; variant?: string;
-      }>('/v1/pos/scan', { barcode, branch_id: parseInt(branchId, 10), quantity: returnMode ? -1 : 1 });
+      }>('/v1/pos/scan', { barcode, branch_id: branchId, quantity: returnMode ? -1 : 1 });
       addProductToCart({
         product_id: result.product_id,
         sku_id: result.sku_id,
@@ -282,7 +293,7 @@ export default function Checkout() {
       if (e.key === 'F3') { e.preventDefault(); holdCart(); }
       if (e.key === 'F4') { e.preventDefault(); setShowCustomerModal(true); }
       if (e.key === 'F5') { e.preventDefault(); setShowDiscountModal(true); }
-      if (e.key === 'Escape') { setCart([]); setDiscount(null); setSelectedCustomer(null); setActiveHeldId(null); }
+      if (e.key === 'Escape') { clearSale(); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -291,9 +302,14 @@ export default function Checkout() {
 
   const activeCart = cart.filter(i => !i.voided);
   const subtotal = activeCart.reduce((s, i) => s + i.price * i.quantity, 0);
-  const discountAmount = discount
+  const presetDiscountAmount = discount
     ? discount.type === 'percent' ? subtotal * (discount.value / 100) : Math.min(discount.value, subtotal)
     : 0;
+  const remainingAfterPreset = Math.max(0, subtotal - presetDiscountAmount);
+  const availableLoyaltyPoints = selectedCustomer?.loyalty_points ?? 0;
+  const maxLoyaltyRedeem = Math.min(availableLoyaltyPoints, Math.floor(remainingAfterPreset));
+  const loyaltyDiscount = Math.min(loyaltyPointsToRedeem, maxLoyaltyRedeem);
+  const discountAmount = presetDiscountAmount + loyaltyDiscount;
   const afterDiscount = subtotal - discountAmount;
   const taxAmount = afterDiscount * taxRate;
   const total = afterDiscount + taxAmount;
@@ -314,25 +330,29 @@ export default function Checkout() {
   const snapshotReceipt = (): ReceiptSnapshot => ({
     items: activeCart,
     subtotal,
-    discountAmount,
+    discountAmount: presetDiscountAmount,
+    loyaltyDiscount,
     taxAmount,
     total,
   });
 
+  // Keep redeemed points within the current max (discount / cart changes)
+  useEffect(() => {
+    if (loyaltyPointsToRedeem > maxLoyaltyRedeem) {
+      setLoyaltyPointsToRedeem(maxLoyaltyRedeem);
+    }
+  }, [loyaltyPointsToRedeem, maxLoyaltyRedeem, setLoyaltyPointsToRedeem]);
+
   const holdCart = () => {
     if (!activeCart.length) { showToast('Cart is empty', 'error'); return; }
-    const held = JSON.parse(localStorage.getItem(HELD_KEY) || '[]');
     const id = activeHeldId ?? Date.now();
-    held.push({ id, cart, savedAt: new Date().toISOString(), customer: selectedCustomer?.name });
-    localStorage.setItem(HELD_KEY, JSON.stringify(held));
-    setActiveHeldId(null);
-    setCart([]); setDiscount(null); setSelectedCustomer(null);
+    setHeldCarts([...heldCarts, { id, cart, savedAt: new Date().toISOString(), customer: selectedCustomer?.name }]);
+    clearSale();
     showToast('Sale suspended', 'success');
   };
 
-  const resumeHeld = (held: typeof heldCarts[0]) => {
-    const all = JSON.parse(localStorage.getItem(HELD_KEY) || '[]') as typeof heldCarts;
-    localStorage.setItem(HELD_KEY, JSON.stringify(all.filter(h => h.id !== held.id)));
+  const resumeHeld = (held: HeldCart) => {
+    setHeldCarts(heldCarts.filter(h => h.id !== held.id));
     setActiveHeldId(held.id);
     setCart(held.cart);
     setShowHeldModal(false);
@@ -340,7 +360,6 @@ export default function Checkout() {
   };
 
   const openHeldModal = () => {
-    setHeldCarts(JSON.parse(localStorage.getItem(HELD_KEY) || '[]'));
     setShowHeldModal(true);
   };
 
@@ -359,15 +378,16 @@ export default function Checkout() {
     try {
       const data = await post<{
         sale_id?: number; total?: number;
-        loyalty_points_earned?: number; customer_loyalty_points?: number;
+        loyalty_points_earned?: number; loyalty_points_redeemed?: number; customer_loyalty_points?: number;
       }>('/sales/checkout', {
         payment_method: paymentMethod,
-        branch_id: parseInt(branchId, 10),
+        branch_id: branchId,
         terminal_id: 'TERM-001',
         customer_id: selectedCustomer?.id,
         notes: saleNotes,
         cash_received: paymentMethod === 'Cash' ? parseFloat(cashReceived) : undefined,
         discount: discount ? { type: discount.type, value: discount.value, name: discount.name } : undefined,
+        loyalty_points_to_redeem: loyaltyDiscount > 0 ? loyaltyDiscount : undefined,
         items: activeCart.map(i => ({
           product_id: i.product_id,
           sku_id: i.sku_id,
@@ -377,25 +397,21 @@ export default function Checkout() {
         })),
       });
       let toastMsg = `Sale #${data.sale_id} — ${formatCurrency(data.total ?? total)}`;
-      if (selectedCustomer && data.loyalty_points_earned) {
-        toastMsg += ` · +${data.loyalty_points_earned} loyalty pt${data.loyalty_points_earned !== 1 ? 's' : ''}`;
-        setCustomers(prev => prev.map(c =>
-          c.id === selectedCustomer.id
-            ? { ...c, loyalty_points: data.customer_loyalty_points ?? ((c.loyalty_points ?? 0) + data.loyalty_points_earned!) }
-            : c,
-        ));
+      if (selectedCustomer) {
+        const earned = data.loyalty_points_earned ?? 0;
+        const redeemed = data.loyalty_points_redeemed ?? 0;
+        if (earned > 0) toastMsg += ` · +${earned} loyalty pt${earned !== 1 ? 's' : ''}`;
+        if (redeemed > 0) toastMsg += ` · −${redeemed} redeemed`;
+        if (earned > 0 || redeemed > 0 || data.customer_loyalty_points != null) {
+          setCustomers(prev => prev.map(c =>
+            c.id === selectedCustomer.id
+              ? { ...c, loyalty_points: data.customer_loyalty_points ?? Math.max(0, (c.loyalty_points ?? 0) - redeemed + earned) }
+              : c,
+          ));
+        }
       }
       showToast(toastMsg, 'success');
-      setReceiptSnapshot({ ...snapshotReceipt(), saleId: data.sale_id, total: data.total ?? total });
-      setActiveHeldId(null);
-      setCart([]);
-      setDiscount(null);
-      setSelectedCustomer(null);
-      setSaleNotes('');
-      setCashReceived('');
-      setCouponCode('');
-      setReturnMode(false);
-      setShowReceipt(true);
+      clearSale();
     } catch (e) {
       showToast(getUserMessage(e), 'error');
     } finally {
@@ -533,14 +549,27 @@ export default function Checkout() {
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <div>
             <h2 className="font-bold text-sm">Cart ({activeCart.length})</h2>
-            {selectedCustomer && <p className="text-xs text-accent-600 flex items-center gap-1 mt-0.5"><User className="w-3 h-3" />{selectedCustomer.name}</p>}
+            {selectedCustomer && (
+              <p className="text-xs text-accent-600 flex items-center gap-1 mt-0.5">
+                <User className="w-3 h-3" />{selectedCustomer.name}
+                {availableLoyaltyPoints > 0 && (
+                  <span className="text-muted">· {availableLoyaltyPoints} pts</span>
+                )}
+              </p>
+            )}
           </div>
           <div className="flex gap-0.5">
             <button onClick={holdCart} title="Suspend (F3)" className="p-2 rounded-lg hover:bg-canvas-subtle text-muted"><Pause className="w-4 h-4" /></button>
             <button onClick={openHeldModal} title="Resume" className="p-2 rounded-lg hover:bg-canvas-subtle text-muted"><Play className="w-4 h-4" /></button>
             <button onClick={() => { setShowCustomerModal(true); }} title="Customer (F4)" className="p-2 rounded-lg hover:bg-canvas-subtle text-muted"><User className="w-4 h-4" /></button>
-            <button onClick={() => setShowDiscountModal(true)} title="Discount (F5)" className="p-2 rounded-lg hover:bg-canvas-subtle text-muted"><Tag className="w-4 h-4" /></button>
-            <button onClick={async () => { if (await showConfirm({ title: 'Clear Cart', message: 'Remove all items?', variant: 'danger' })) { setCart([]); setDiscount(null); setActiveHeldId(null); } }} title="Clear" className="p-2 rounded-lg hover:bg-canvas-subtle text-muted"><RotateCcw className="w-4 h-4" /></button>
+            <button
+              onClick={() => setShowDiscountModal(true)}
+              title="Discount (F5)"
+              className={`p-2 rounded-lg hover:bg-canvas-subtle ${discount ? 'text-accent-600 bg-accent-500/10' : 'text-muted'}`}
+            >
+              <Tag className="w-4 h-4" />
+            </button>
+            <button onClick={async () => { if (await showConfirm({ title: 'Clear Cart', message: 'Remove all items?', variant: 'danger' })) clearSale(); }} title="Clear" className="p-2 rounded-lg hover:bg-canvas-subtle text-muted"><RotateCcw className="w-4 h-4" /></button>
           </div>
         </div>
 
@@ -642,9 +671,9 @@ export default function Checkout() {
 
         {/* Payment + totals */}
         <div className="p-4 border-t border-border space-y-3 bg-canvas-subtle">
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-2 gap-1.5">
             {PAYMENT_METHODS.map(pm => {
-              const icons: Record<string, typeof CreditCard> = { Cash: Banknote, Card: CreditCard, UPI: Smartphone, Wallet: Wallet, Split: Split };
+              const icons: Record<string, typeof CreditCard> = { Cash: Banknote, Card: CreditCard };
               const Icon = icons[pm] || CreditCard;
               return (
                 <button key={pm} onClick={() => setPaymentMethod(pm)} className={`py-2 rounded-xl border text-[10px] font-bold flex flex-col items-center gap-0.5 transition-all ${paymentMethod === pm ? 'border-accent-600 bg-accent-600 text-white shadow-sm' : 'border-border text-muted hover:border-accent-300 bg-surface'}`}>
@@ -663,9 +692,77 @@ export default function Checkout() {
             </>
           )}
 
+          {selectedCustomer && availableLoyaltyPoints > 0 && (
+            <div className="rounded-xl border border-border bg-surface p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Star className="w-3.5 h-3.5 text-accent-600 shrink-0" />
+                  <span className="text-xs font-semibold truncate">Redeem loyalty</span>
+                </div>
+                <span className="text-[10px] text-muted shrink-0">{availableLoyaltyPoints} pts · 1 pt = Rs. 1</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  max={maxLoyaltyRedeem}
+                  value={loyaltyPointsToRedeem ? String(loyaltyPointsToRedeem) : ''}
+                  onChange={e => {
+                    const n = parseInt(e.target.value, 10);
+                    setLoyaltyPointsToRedeem(Number.isFinite(n) ? Math.min(Math.max(0, n), maxLoyaltyRedeem) : 0);
+                  }}
+                  placeholder="Points to redeem"
+                  className="input-base flex-1 text-sm"
+                />
+                <button
+                  type="button"
+                  disabled={maxLoyaltyRedeem <= 0}
+                  onClick={() => setLoyaltyPointsToRedeem(maxLoyaltyRedeem)}
+                  className="shrink-0 px-3 py-2 rounded-xl border border-border text-xs font-semibold text-accent-600 hover:bg-accent-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Max ({maxLoyaltyRedeem})
+                </button>
+              </div>
+              {loyaltyDiscount > 0 && (
+                <p className="text-[10px] text-success">−{formatCurrency(loyaltyDiscount)} off this sale</p>
+              )}
+            </div>
+          )}
+
           <div className="space-y-1 text-sm">
             <div className="flex justify-between text-muted"><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
-            {discount && <div className="flex justify-between text-success"><span>Discount ({discount.name})</span><span>-{formatCurrency(discountAmount)}</span></div>}
+            {discount && (
+              <div className="flex justify-between items-center text-success gap-2">
+                <span className="truncate">Discount ({discount.name})</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span>-{formatCurrency(presetDiscountAmount)}</span>
+                  <button
+                    type="button"
+                    onClick={() => setDiscount(null)}
+                    className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-md border border-danger/30 text-danger hover:bg-danger-soft transition-colors"
+                    title="Remove discount"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            )}
+            {loyaltyDiscount > 0 && (
+              <div className="flex justify-between items-center text-success gap-2">
+                <span className="truncate">Loyalty ({loyaltyDiscount} pts)</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span>-{formatCurrency(loyaltyDiscount)}</span>
+                  <button
+                    type="button"
+                    onClick={() => setLoyaltyPointsToRedeem(0)}
+                    className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-md border border-danger/30 text-danger hover:bg-danger-soft transition-colors"
+                    title="Remove loyalty discount"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="flex justify-between text-muted"><span>Tax ({Math.round(taxRate * 100)}%)</span><span>{formatCurrency(taxAmount)}</span></div>
             {change > 0 && <div className="flex justify-between text-warning"><span>Change</span><span>{formatCurrency(change)}</span></div>}
             <div className="flex justify-between items-end pt-1 border-t border-border">
@@ -813,8 +910,27 @@ export default function Checkout() {
       </Modal>
 
       {/* Discount modal */}
-      <Modal open={showDiscountModal} onClose={() => setShowDiscountModal(false)} title="Apply Discount" size="sm"
-        footer={<><Button variant="secondary" onClick={() => setShowDiscountModal(false)}>Cancel</Button><Button onClick={() => setShowDiscountModal(false)}>Apply</Button></>}>
+      <Modal
+        open={showDiscountModal}
+        onClose={() => setShowDiscountModal(false)}
+        title="Apply Discount"
+        size="sm"
+        footer={
+          <>
+            {discount && (
+              <Button
+                variant="danger"
+                onClick={() => { setDiscount(null); setCouponCode(''); setShowDiscountModal(false); }}
+                className="mr-auto"
+              >
+                Remove discount
+              </Button>
+            )}
+            <Button variant="secondary" onClick={() => setShowDiscountModal(false)}>Cancel</Button>
+            <Button onClick={() => setShowDiscountModal(false)}>Done</Button>
+          </>
+        }
+      >
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-2">
             {(discountPresets.length ? discountPresets : [
@@ -829,7 +945,11 @@ export default function Checkout() {
             ))}
           </div>
           <Input label="Coupon code" value={couponCode} onChange={e => setCouponCode(e.target.value)} placeholder="Enter code" />
-          {discount && <button onClick={() => setDiscount(null)} className="text-xs text-danger hover:underline">Remove discount</button>}
+          {discount && (
+            <p className="text-xs text-success">
+              Applied: <span className="font-semibold">{discount.name}</span>
+            </p>
+          )}
         </div>
       </Modal>
 
@@ -859,6 +979,7 @@ export default function Checkout() {
           <div className="border-t border-border pt-2 mt-2 space-y-0.5">
             <div className="flex justify-between"><span>Subtotal</span><span>{formatCurrency(displayReceipt.subtotal)}</span></div>
             {displayReceipt.discountAmount > 0 && <div className="flex justify-between"><span>Discount</span><span>-{formatCurrency(displayReceipt.discountAmount)}</span></div>}
+            {(displayReceipt.loyaltyDiscount ?? 0) > 0 && <div className="flex justify-between"><span>Loyalty</span><span>-{formatCurrency(displayReceipt.loyaltyDiscount)}</span></div>}
             <div className="flex justify-between"><span>Tax</span><span>{formatCurrency(displayReceipt.taxAmount)}</span></div>
             <div className="flex justify-between font-bold text-sm"><span>TOTAL</span><span>{formatCurrency(displayReceipt.total)}</span></div>
           </div>

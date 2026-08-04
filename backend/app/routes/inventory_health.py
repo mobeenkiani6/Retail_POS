@@ -4,6 +4,7 @@ from sqlalchemy import func
 from app.models import db, ProductBatch, Product, Category
 from app.utils.auth_decorators import token_required
 from app.services.fefo_service import batch_status, _get_expiry_config, apply_near_expiry_markdowns
+from app.branch_scope import resolve_branch_id
 
 inventory_health_bp = Blueprint('inventory_health', __name__)
 
@@ -11,11 +12,7 @@ inventory_health_bp = Blueprint('inventory_health', __name__)
 @inventory_health_bp.route('/summary', methods=['GET'])
 @token_required
 def health_summary(current_user):
-    branch_id = request.args.get('branch_id')
-    if current_user.role != 'owner':
-        branch_id = current_user.branch_id
-    elif branch_id:
-        branch_id = int(branch_id)
+    branch_id = resolve_branch_id(current_user, request.args.get('branch_id'))
 
     if branch_id:
         apply_near_expiry_markdowns(branch_id)
@@ -24,7 +21,7 @@ def health_summary(current_user):
     if branch_id:
         query = query.filter(ProductBatch.branch_id == branch_id)
     batches = query.all()
-    cfg = _get_expiry_config(branch_id or 1)
+    cfg = _get_expiry_config(branch_id)
     today = date.today()
 
     by_status = {'active': 0, 'near_expiry': 0, 'expired': 0, 'depleted': 0}

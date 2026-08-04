@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from app.models import db, Setting
 from app.utils.auth_decorators import token_required, owner_required
+from app.branch_scope import resolve_branch_id
 
 settings_bp = Blueprint('settings', __name__)
 
@@ -27,12 +28,7 @@ def get_settings(current_user):
         global_config = global_setting.config if global_setting else {}
         return jsonify({"config": global_config}), 200
 
-    branch_id_str = request.args.get('branch_id')
-    
-    if current_user.role == 'owner' and branch_id_str:
-        branch_id = int(branch_id_str)
-    else:
-        branch_id = current_user.branch_id
+    branch_id = resolve_branch_id(current_user, request.args.get('branch_id'))
 
     # Always fetch the global config as a base
     global_setting = Setting.query.filter_by(branch_id=None).first()
@@ -58,8 +54,13 @@ def update_settings(current_user):
     if not data or 'config' not in data:
         return jsonify({"message": "Missing config data"}), 400
         
-    # Owners can pass branch_id (or null for global). Otherwise default to their own branch.
-    branch_id = data.get('branch_id') if 'branch_id' in data else current_user.branch_id
+    # Explicit null = global settings; otherwise resolve to this POS branch UUID.
+    if 'branch_id' in data and data.get('branch_id') is None:
+        branch_id = None
+    elif 'branch_id' in data:
+        branch_id = resolve_branch_id(current_user, data.get('branch_id'))
+    else:
+        branch_id = resolve_branch_id(current_user)
     
     setting = Setting.query.filter_by(branch_id=branch_id).first()
     

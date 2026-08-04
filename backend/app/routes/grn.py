@@ -3,26 +3,23 @@ from app.models import db, GoodsReceivedNote
 from app.utils.auth_decorators import token_required, role_required
 from app.services.grn_service import create_grn, receive_grn, cancel_grn, grn_to_dict
 from app.errors import error_response
+from app.branch_scope import resolve_branch_id, require_branch_id
 
 grn_bp = Blueprint('grn', __name__)
 
 
 def _resolve_branch(current_user, data):
-    branch_id = data.get('branch_id') if data else None
-    if current_user.role != 'owner':
-        return current_user.branch_id
-    return branch_id or current_user.branch_id or 1
+    requested = data.get('branch_id') if data else None
+    return resolve_branch_id(current_user, requested) or require_branch_id(current_user)
 
 
 @grn_bp.route('/', methods=['GET'])
 @token_required
 def list_grns(current_user):
-    branch_id = request.args.get('branch_id')
+    branch_id = resolve_branch_id(current_user, request.args.get('branch_id'))
     query = GoodsReceivedNote.query
-    if current_user.role != 'owner':
-        query = query.filter_by(branch_id=current_user.branch_id)
-    elif branch_id:
-        query = query.filter_by(branch_id=int(branch_id))
+    if branch_id:
+        query = query.filter_by(branch_id=branch_id)
     grns = query.order_by(GoodsReceivedNote.created_at.desc()).all()
     return jsonify({'grns': [grn_to_dict(g) for g in grns]}), 200
 

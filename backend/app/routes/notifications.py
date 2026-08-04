@@ -3,6 +3,7 @@ from app.models import db, Notification
 from app.utils.auth_decorators import token_required, role_required
 from app.services.notification_service import generate_system_notifications
 from app.errors import error_response
+from app.branch_scope import resolve_branch_id
 
 notifications_bp = Blueprint('notifications', __name__)
 
@@ -22,11 +23,7 @@ def _notif_dict(n):
 @notifications_bp.route('/', methods=['GET'])
 @token_required
 def list_notifications(current_user):
-    branch_id = request.args.get('branch_id')
-    if current_user.role != 'owner':
-        branch_id = current_user.branch_id
-    elif branch_id:
-        branch_id = int(branch_id)
+    branch_id = resolve_branch_id(current_user, request.args.get('branch_id'))
 
     generate_system_notifications(branch_id)
 

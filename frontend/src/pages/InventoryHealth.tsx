@@ -7,6 +7,7 @@ import Card from '../components/ui/Card';
 import StatusBadge from '../components/ui/StatusBadge';
 import { get } from '../api';
 import { formatCurrency } from '../utils/formatCurrency';
+import { getBranchId } from '../branch';
 
 type HealthData = {
   by_status: Record<string, number>;
@@ -25,7 +26,7 @@ export default function InventoryHealth() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const branchId = localStorage.getItem('active_branch_id') || '1';
+    const branchId = getBranchId();
     get<HealthData>(`/v1/inventory-health/summary?branch_id=${branchId}`)
       .then(setData)
       .finally(() => setLoading(false));

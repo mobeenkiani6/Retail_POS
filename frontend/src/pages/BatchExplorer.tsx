@@ -7,6 +7,7 @@ import Button from '../components/ui/Button';
 import SearchInput from '../components/ui/SearchInput';
 import { get, getUserMessage } from '../api';
 import { formatCurrency } from '../utils/formatCurrency';
+import { getBranchId } from '../branch';
 
 type BatchDetail = {
   batch: {
@@ -43,7 +44,7 @@ export default function BatchExplorer() {
     setError('');
     setSelected(null);
     try {
-      const branchId = localStorage.getItem('active_branch_id') || '1';
+      const branchId = getBranchId();
       const data = await get<{ batches?: Record<string, unknown>[] }>(`/v1/batches/?search=${encodeURIComponent(search)}&branch_id=${branchId}`);
       setResults(data?.batches ?? []);
     } catch (e) {
