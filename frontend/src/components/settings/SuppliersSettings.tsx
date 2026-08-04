@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ChangeEvent } from 'react';
 import { Plus, Edit2, Archive, ArchiveRestore, Trash2, Loader2 } from 'lucide-react';
 import { get, post, put, patch, del, getUserMessage } from '../../api';
 import { showToast } from '../Toast';
@@ -7,20 +7,27 @@ import Input from '../ui/Input';
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';
 import Badge from '../ui/Badge';
+import { formatCurrency } from '../../utils/formatCurrency';
 
 type Supplier = {
   id: number;
   name: string;
+  supplier_code?: string;
   contact_name?: string;
   email?: string;
   phone?: string;
+  whatsapp?: string;
   address?: string;
-  notes?: string;
+  city?: string;
   outstanding_balance?: number;
+  status?: string;
   archived_at?: string | null;
 };
 
-const emptyForm = { name: '', contact_name: '', email: '', phone: '', address: '', notes: '' };
+const emptyForm = {
+  name: '', supplier_code: '', contact_name: '', email: '', phone: '',
+  whatsapp: '', address: '', city: '',
+};
 
 export default function SuppliersSettings() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -47,24 +54,37 @@ export default function SuppliersSettings() {
     setEditing(s);
     setForm({
       name: s.name,
+      supplier_code: s.supplier_code || '',
       contact_name: s.contact_name || '',
       email: s.email || '',
       phone: s.phone || '',
+      whatsapp: s.whatsapp || '',
       address: s.address || '',
-      notes: s.notes || '',
+      city: s.city || '',
     });
     setModalOpen(true);
   };
 
+  const payload = () => ({
+    name: form.name.trim(),
+    supplier_code: form.supplier_code.trim() || undefined,
+    contact_name: form.contact_name || null,
+    email: form.email || null,
+    phone: form.phone || null,
+    whatsapp: form.whatsapp || null,
+    address: form.address || null,
+    city: form.city || null,
+  });
+
   const save = async () => {
-    if (!form.name.trim()) { showToast('Supplier name required', 'error'); return; }
+    if (!form.name.trim()) { showToast('Company name required', 'error'); return; }
     setSaving(true);
     try {
       if (editing) {
-        await put(`/v1/suppliers/${editing.id}`, form);
+        await put(`/v1/suppliers/${editing.id}`, payload());
         showToast('Supplier updated', 'success');
       } else {
-        await post('/v1/suppliers/', form);
+        await post('/v1/suppliers/', payload());
         showToast('Supplier created', 'success');
       }
       setModalOpen(false);
@@ -96,6 +116,9 @@ export default function SuppliersSettings() {
     load();
   };
 
+  const setF = (key: keyof typeof emptyForm) => (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setForm(f => ({ ...f, [key]: e.target.value }));
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -121,7 +144,9 @@ export default function SuppliersSettings() {
             <div key={s.id} className={`flex items-center justify-between px-4 py-3 gap-3 ${s.archived_at ? 'opacity-70 bg-canvas-subtle' : ''}`}>
               <div className="min-w-0">
                 <p className="font-medium text-sm text-foreground">{s.name}</p>
-                <p className="text-xs text-muted truncate">{s.contact_name || s.email || s.phone || '—'}</p>
+                <p className="text-xs text-muted truncate">
+                  {[s.supplier_code, s.contact_name || s.phone, formatCurrency(s.outstanding_balance || 0)].filter(Boolean).join(' · ')}
+                </p>
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 {s.archived_at && <Badge variant="warning">Archived</Badge>}
@@ -143,19 +168,23 @@ export default function SuppliersSettings() {
         </div>
       )}
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Edit Supplier' : 'New Supplier'} size="md">
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Edit Supplier' : 'Add supplier'} size="md">
         <div className="space-y-3">
-          <Input label="Name *" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-          <Input label="Contact Person" value={form.contact_name} onChange={e => setForm(f => ({ ...f, contact_name: e.target.value }))} />
+          <Input label="Company Name *" value={form.name} onChange={setF('name')} placeholder="e.g. Sysco Foods" />
+          <Input label="Supplier Code" hint="Auto-generated for new suppliers. You can still edit it." value={form.supplier_code} onChange={setF('supplier_code')} placeholder="Auto-generated from supplier name" />
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-            <Input label="Phone" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+            <Input label="Contact Person" value={form.contact_name} onChange={setF('contact_name')} placeholder="e.g. John Doe" />
+            <Input label="Phone" value={form.phone} onChange={setF('phone')} placeholder="555-0192" />
           </div>
-          <Input label="Address" value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} />
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="WhatsApp (optional)" value={form.whatsapp} onChange={setF('whatsapp')} />
+            <Input label="Email" value={form.email} onChange={setF('email')} placeholder="orders@sysco.com" />
+          </div>
           <div>
-            <label className="text-xs font-medium text-muted mb-1 block">Notes</label>
-            <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} className="input-base w-full resize-none" />
+            <label className="text-xs font-medium text-muted mb-1 block">Address</label>
+            <textarea value={form.address} onChange={setF('address')} rows={2} placeholder="123 Industrial Pkwy" className="input-base w-full resize-none" />
           </div>
+          <Input label="City" value={form.city} onChange={setF('city')} />
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
             <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>

@@ -7,6 +7,7 @@ import Setup from './pages/Setup';
 import Login from './pages/Login';
 import OperationsDashboard from './pages/OperationsDashboard';
 import Checkout from './pages/Checkout';
+import PreviousOrders from './pages/PreviousOrders';
 import GroceryProducts from './pages/GroceryProducts';
 import InventoryPage from './pages/InventoryPage';
 import GRN from './pages/GRN';
@@ -43,6 +44,7 @@ export default function App() {
               <Route path="/" element={<Navigate to="/operations" replace />} />
               <Route path="/operations" element={<OperationsDashboard />} />
               <Route path="/checkout" element={<Checkout />} />
+              <Route path="/previous-orders" element={<PreviousOrders />} />
               <Route path="/grocery-products" element={<GroceryProducts />} />
               <Route path="/inventory" element={<InventoryPage />} />
               <Route path="/grn" element={<GRN />} />

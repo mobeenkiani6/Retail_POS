@@ -97,6 +97,24 @@ def receive_grn(grn_id, user_id):
 
     grn.status = 'received'
     grn.received_at = datetime.utcnow()
+
+    # Post purchase to supplier ledger (increases outstanding balance)
+    if grn.supplier_id:
+        try:
+            from app.services.supplier_ledger_service import post_purchase
+            purchase_total = sum(
+                float(item.cost_price or 0) * int(item.quantity or 0)
+                for item in grn.items
+            )
+            if purchase_total > 0:
+                post_purchase(
+                    grn.supplier_id, purchase_total,
+                    grn_id=grn.id, grn_number=grn.grn_number,
+                    user_id=user_id, notes=f'GRN {grn.grn_number}',
+                )
+        except Exception as e:
+            print(f'Warning: supplier ledger post failed for GRN {grn.id}: {e}')
+
     db.session.commit()
     return grn
 

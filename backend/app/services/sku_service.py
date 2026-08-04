@@ -41,7 +41,6 @@ def sku_to_dict(sku: ProductSku, branch_id=None) -> dict:
         'display_label': format_sku_display(sku),
         'cost_price': float(sku.cost_price or 0),
         'selling_price': float(sku.selling_price or 0),
-        'wholesale_price': float(sku.wholesale_price) if sku.wholesale_price is not None else None,
         'tax_rate': float(tax or 0),
         'min_stock': sku.min_stock or 0,
         'max_stock': sku.max_stock,
@@ -98,11 +97,6 @@ def parse_sku_payload(data: dict, product: Product | None = None) -> dict | None
         sell = float(data.get('selling_price', data.get('base_price', data.get('sell_price', 0))) or 0)
     except (TypeError, ValueError):
         sell = 0.0
-    wholesale = data.get('wholesale_price')
-    try:
-        wholesale = float(wholesale) if wholesale not in (None, '') else None
-    except (TypeError, ValueError):
-        wholesale = None
     unit_id = data.get('unit_id')
     try:
         unit_id = int(unit_id) if unit_id not in (None, '') else None
@@ -129,7 +123,6 @@ def parse_sku_payload(data: dict, product: Product | None = None) -> dict | None
         'unit_abbr': unit_abbr,
         'cost_price': max(cost, 0),
         'selling_price': max(sell, 0),
-        'wholesale_price': wholesale,
         'tax_rate': tax_rate,
         'min_stock': int(data.get('min_stock', 0) or 0),
         'max_stock': int(data['max_stock']) if data.get('max_stock') not in (None, '') else None,
@@ -152,7 +145,6 @@ def apply_sku_fields(sku: ProductSku, parsed: dict):
     sku.unit_abbr = parsed.get('unit_abbr')
     sku.cost_price = parsed['cost_price']
     sku.selling_price = parsed['selling_price']
-    sku.wholesale_price = parsed.get('wholesale_price')
     sku.tax_rate = parsed.get('tax_rate')
     sku.min_stock = parsed.get('min_stock', 0)
     sku.max_stock = parsed.get('max_stock')

@@ -128,6 +128,74 @@ MIGRATIONS = [
     "ALTER TABLE grn_items ADD COLUMN IF NOT EXISTS sku_id INTEGER REFERENCES product_skus(id)",
     "ALTER TABLE inventory DROP CONSTRAINT IF EXISTS _branch_sku_uc",
     "ALTER TABLE inventory ADD CONSTRAINT _branch_sku_uc UNIQUE (branch_id, sku_id)",
+    # --- Previous Orders / receipt permanence ---
+    "ALTER TABLE sales ADD COLUMN IF NOT EXISTS invoice_number VARCHAR(40)",
+    "ALTER TABLE sales ADD COLUMN IF NOT EXISTS receipt_number VARCHAR(40)",
+    "ALTER TABLE sales ADD COLUMN IF NOT EXISTS subtotal_amount NUMERIC(12,2) DEFAULT 0",
+    "ALTER TABLE sales ADD COLUMN IF NOT EXISTS cash_received NUMERIC(12,2)",
+    "ALTER TABLE sales ADD COLUMN IF NOT EXISTS receipt_snapshot JSONB",
+    "ALTER TABLE sales ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_sales_invoice_number ON sales (invoice_number) WHERE invoice_number IS NOT NULL",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_sales_receipt_number ON sales (receipt_number) WHERE receipt_number IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS ix_sales_created_at ON sales (created_at)",
+    "ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS quantity_returned INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE sales DROP CONSTRAINT IF EXISTS ck_sale_status_valid",
+    """DO $$ BEGIN
+        ALTER TABLE sales ADD CONSTRAINT ck_sale_status_valid
+        CHECK (status IN ('completed', 'refunded', 'held', 'partially_returned'));
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$""",
+    """CREATE TABLE IF NOT EXISTS sale_returns (
+        id SERIAL PRIMARY KEY,
+        sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+        return_number VARCHAR(40) NOT NULL UNIQUE,
+        refund_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+        refund_method VARCHAR(50),
+        reason TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )""",
+    """CREATE TABLE IF NOT EXISTS sale_return_items (
+        id SERIAL PRIMARY KEY,
+        return_id INTEGER NOT NULL REFERENCES sale_returns(id) ON DELETE CASCADE,
+        sale_item_id INTEGER NOT NULL REFERENCES sale_items(id),
+        quantity INTEGER NOT NULL,
+        unit_price NUMERIC(12,2) NOT NULL,
+        subtotal NUMERIC(12,2) NOT NULL
+    )""",
+    # --- Supplier module extensions ---
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS supplier_code VARCHAR(80)",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS whatsapp VARCHAR(50)",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS city VARCHAR(100)",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS state VARCHAR(100)",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS country VARCHAR(100)",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS postal_code VARCHAR(30)",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS ntn VARCHAR(50)",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS strn VARCHAR(50)",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS payment_terms VARCHAR(120)",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS credit_limit NUMERIC(12,2) DEFAULT 0",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS opening_balance NUMERIC(12,2) DEFAULT 0",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS bank_name VARCHAR(120)",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS bank_account VARCHAR(80)",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS iban VARCHAR(80)",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active'",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_suppliers_supplier_code ON suppliers (supplier_code) WHERE supplier_code IS NOT NULL",
+    """CREATE TABLE IF NOT EXISTS supplier_ledger_entries (
+        id SERIAL PRIMARY KEY,
+        supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+        entry_type VARCHAR(30) NOT NULL,
+        amount NUMERIC(12,2) NOT NULL,
+        balance_after NUMERIC(12,2) NOT NULL DEFAULT 0,
+        reference_type VARCHAR(50),
+        reference_id INTEGER,
+        reference_number VARCHAR(80),
+        payment_method VARCHAR(50),
+        notes TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_supplier_ledger_supplier_id ON supplier_ledger_entries (supplier_id)",
+    "CREATE INDEX IF NOT EXISTS ix_supplier_ledger_created_at ON supplier_ledger_entries (created_at)",
 ]
 
 

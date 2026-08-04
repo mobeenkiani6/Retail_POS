@@ -2,7 +2,6 @@ export type ProductVariant = {
   name: string;
   base_price: number;
   cost_price: number;
-  wholesale_price?: number | null;
   stock_level?: number;
 };
 
@@ -10,13 +9,12 @@ export type ProductVariantForm = {
   name: string;
   base_price: string;
   cost_price: string;
-  wholesale_price: string;
   stock_level: string;
 };
 
 export function normalizeProductVariants(
   raw: unknown,
-  fallback: { base_price: number; cost_price: number; wholesale_price?: number | null },
+  fallback: { base_price: number; cost_price: number },
 ): ProductVariant[] {
   if (!Array.isArray(raw) || raw.length === 0) return [];
   const out: ProductVariant[] = [];
@@ -28,7 +26,6 @@ export function normalizeProductVariants(
         name,
         base_price: fallback.base_price,
         cost_price: fallback.cost_price,
-        wholesale_price: fallback.wholesale_price ?? null,
       });
       continue;
     }
@@ -40,9 +37,6 @@ export function normalizeProductVariants(
         name,
         base_price: Number(o.base_price ?? fallback.base_price) || 0,
         cost_price: Number(o.cost_price ?? fallback.cost_price) || 0,
-        wholesale_price: o.wholesale_price != null && o.wholesale_price !== ''
-          ? Number(o.wholesale_price)
-          : null,
         stock_level: o.stock_level != null ? Number(o.stock_level) : undefined,
       });
     }
@@ -52,14 +46,13 @@ export function normalizeProductVariants(
 
 export function variantsToForm(
   raw: unknown,
-  fallback: { base_price: number; cost_price: number; wholesale_price?: number | null },
+  fallback: { base_price: number; cost_price: number },
   stockByVariant?: Record<string, number>,
 ): ProductVariantForm[] {
   return normalizeProductVariants(raw, fallback).map(v => ({
     name: v.name,
     base_price: String(v.base_price),
     cost_price: String(v.cost_price),
-    wholesale_price: v.wholesale_price != null ? String(v.wholesale_price) : '',
     stock_level: String(stockByVariant?.[v.name] ?? v.stock_level ?? 0),
   }));
 }

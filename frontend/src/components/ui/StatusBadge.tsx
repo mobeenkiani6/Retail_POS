@@ -2,6 +2,7 @@ import Badge from './Badge';
 
 const statusMap: Record<string, { label: string; variant: 'default' | 'accent' | 'success' | 'warning' | 'danger' }> = {
   active: { label: 'Active', variant: 'success' },
+  inactive: { label: 'Inactive', variant: 'default' },
   near_expiry: { label: 'Near Expiry', variant: 'warning' },
   expired: { label: 'Expired', variant: 'danger' },
   depleted: { label: 'Depleted', variant: 'default' },
@@ -10,6 +11,10 @@ const statusMap: Record<string, { label: string; variant: 'default' | 'accent' |
   cancelled: { label: 'Cancelled', variant: 'danger' },
   pending: { label: 'Pending', variant: 'warning' },
   synced: { label: 'Synced', variant: 'success' },
+  completed: { label: 'Completed', variant: 'success' },
+  refunded: { label: 'Refunded', variant: 'danger' },
+  partially_returned: { label: 'Partially Returned', variant: 'warning' },
+  held: { label: 'Held', variant: 'default' },
 };
 
 export default function StatusBadge({ status }: { status: string }) {

@@ -178,9 +178,25 @@ class PrinterService:
             settings['body_font_scale'] = 1
             settings['total_font_scale'] = 1
         from datetime import datetime
+        # Prefer original sale timestamp from stored snapshot (reprint must not use "now")
+        created_raw = sale_data.get('created_at')
         now = datetime.utcnow()
-        receipt_date = now.strftime('%m/%d/%Y')
-        receipt_time = now.strftime('%I:%M %p').lstrip('0')
+        if created_raw:
+            try:
+                if isinstance(created_raw, str):
+                    created_dt = datetime.fromisoformat(created_raw.replace('Z', '+00:00'))
+                    if created_dt.tzinfo:
+                        created_dt = created_dt.replace(tzinfo=None)
+                elif isinstance(created_raw, datetime):
+                    created_dt = created_raw
+                else:
+                    created_dt = now
+            except Exception:
+                created_dt = now
+        else:
+            created_dt = now
+        receipt_date = created_dt.strftime('%m/%d/%Y')
+        receipt_time = created_dt.strftime('%I:%M %p').lstrip('0')
 
         items = sale_data.get('items')
         if items is None or not isinstance(items, list):
@@ -289,8 +305,17 @@ class PrinterService:
             self.printer.set(align='left')
             op = (sale_data.get('operator') or '').strip()
             branch = (sale_data.get('branch') or '').strip()
+            invoice_no = (sale_data.get('invoice_number') or '').strip()
+            receipt_no = (sale_data.get('receipt_number') or '').strip()
+            pay_method = (sale_data.get('payment_method') or '').strip()
+            if invoice_no:
+                self.printer.text(f"Invoice: {invoice_no}\n")
+            if receipt_no:
+                self.printer.text(f"Receipt: {receipt_no}\n")
             self.printer.text(f"OP: {op}\n")
             self.printer.text(f"Store: {branch}\n")
+            if pay_method:
+                self.printer.text(f"Payment: {pay_method}\n")
             dt_line = f"{receipt_date}  {receipt_time}"
             self.printer.text(dt_line.rjust(self.RECEIPT_WIDTH) + "\n")
             self.printer.text(thin + "\n")

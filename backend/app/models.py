@@ -101,16 +101,50 @@ class Supplier(db.Model):
     __tablename__ = 'suppliers'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(255), nullable=False)
+    supplier_code = db.Column(db.String(80), unique=True, nullable=True)
     contact_name = db.Column(db.String(255))
     email = db.Column(db.String(255))
     phone = db.Column(db.String(50))
+    whatsapp = db.Column(db.String(50), nullable=True)
     address = db.Column(db.Text)
-    outstanding_balance = db.Column(db.Numeric(12, 2), default=0)
+    city = db.Column(db.String(100), nullable=True)
+    state = db.Column(db.String(100), nullable=True)
+    country = db.Column(db.String(100), nullable=True)
+    postal_code = db.Column(db.String(30), nullable=True)
+    ntn = db.Column(db.String(50), nullable=True)
+    strn = db.Column(db.String(50), nullable=True)
+    payment_terms = db.Column(db.String(120), nullable=True)
+    credit_limit = db.Column(db.Numeric(12, 2), nullable=True, default=0)
+    opening_balance = db.Column(db.Numeric(12, 2), nullable=True, default=0)
+    outstanding_balance = db.Column(db.Numeric(12, 2), default=0)  # current balance / due
+    bank_name = db.Column(db.String(120), nullable=True)
+    bank_account = db.Column(db.String(80), nullable=True)
+    iban = db.Column(db.String(80), nullable=True)
     notes = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(20), default='active')  # active | inactive
     created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
     archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     grns = db.relationship('GoodsReceivedNote', backref='supplier', lazy=True)
+    ledger_entries = db.relationship('SupplierLedgerEntry', backref='supplier', lazy=True)
+
+
+class SupplierLedgerEntry(db.Model):
+    """Purchase / payment / return ledger lines for a supplier."""
+    __tablename__ = 'supplier_ledger_entries'
+    id = db.Column(db.Integer, primary_key=True)
+    supplier_id = db.Column(db.Integer, db.ForeignKey('suppliers.id'), nullable=False, index=True)
+    entry_type = db.Column(db.String(30), nullable=False)  # purchase | payment | return | adjustment
+    amount = db.Column(db.Numeric(12, 2), nullable=False)  # +increases due, -decreases due
+    balance_after = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    reference_type = db.Column(db.String(50), nullable=True)  # grn | payment | manual
+    reference_id = db.Column(db.Integer, nullable=True)
+    reference_number = db.Column(db.String(80), nullable=True)
+    payment_method = db.Column(db.String(50), nullable=True)  # cash | bank_transfer | cheque | online
+    notes = db.Column(db.Text, nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow, index=True)
 
 
 class Product(db.Model):
@@ -297,18 +331,27 @@ class Sale(db.Model):
     __table_args__ = (
         CheckConstraint('total_amount >= 0', name='ck_sale_total_non_neg'),
         CheckConstraint('tax_amount >= 0', name='ck_sale_tax_non_neg'),
-        CheckConstraint("status IN ('completed', 'refunded', 'held')", name='ck_sale_status_valid'),
+        CheckConstraint(
+            "status IN ('completed', 'refunded', 'held', 'partially_returned')",
+            name='ck_sale_status_valid',
+        ),
     )
     id = db.Column(db.Integer, primary_key=True)
     invoice_uuid = db.Column(db.String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
+    invoice_number = db.Column(db.String(40), unique=True, nullable=True, index=True)
+    receipt_number = db.Column(db.String(40), unique=True, nullable=True, index=True)
     branch_id = db.Column(db.String(36), db.ForeignKey('branches.id'), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     terminal_id = db.Column(db.String(64), nullable=True)
+    subtotal_amount = db.Column(db.Numeric(12, 2), nullable=True, default=0)
     total_amount = db.Column(db.Numeric(12, 2), nullable=False)
     tax_amount = db.Column(db.Numeric(12, 2), nullable=False)
     cogs_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
     payment_method = db.Column(db.String(50))
-    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    cash_received = db.Column(db.Numeric(12, 2), nullable=True)
+    receipt_snapshot = db.Column(db.JSON, nullable=True)  # exact print payload — never recalculate on reprint
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
     synced_at = db.Column(db.DateTime(timezone=True), nullable=True)
     status = db.Column(db.String(20), default='completed')
     discount_amount = db.Column(db.Numeric(12, 2), nullable=True, default=0)
@@ -319,6 +362,7 @@ class Sale(db.Model):
     archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     items = db.relationship('SaleItem', backref='sale', lazy=True, cascade='all, delete-orphan')
+    returns = db.relationship('SaleReturn', backref='sale', lazy=True, cascade='all, delete-orphan')
 
 
 class SaleItem(db.Model):
@@ -335,10 +379,35 @@ class SaleItem(db.Model):
     sku_id = db.Column(db.Integer, db.ForeignKey('product_skus.id'), nullable=True)
     batch_id = db.Column(db.Integer, db.ForeignKey('product_batches.id'), nullable=True)
     quantity = db.Column(db.Integer, nullable=False)
+    quantity_returned = db.Column(db.Integer, nullable=False, default=0)
     unit_price = db.Column(db.Numeric(12, 2), nullable=False)
     cost_price = db.Column(db.Numeric(12, 2), nullable=False, default=0)
     subtotal = db.Column(db.Numeric(12, 2), nullable=False)
     variant = db.Column(db.String(100), nullable=True)
+
+
+class SaleReturn(db.Model):
+    __tablename__ = 'sale_returns'
+    id = db.Column(db.Integer, primary_key=True)
+    sale_id = db.Column(db.Integer, db.ForeignKey('sales.id', ondelete='CASCADE'), nullable=False, index=True)
+    return_number = db.Column(db.String(40), unique=True, nullable=False)
+    refund_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    refund_method = db.Column(db.String(50), nullable=True)
+    reason = db.Column(db.Text, nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+
+    items = db.relationship('SaleReturnItem', backref='sale_return', lazy=True, cascade='all, delete-orphan')
+
+
+class SaleReturnItem(db.Model):
+    __tablename__ = 'sale_return_items'
+    id = db.Column(db.Integer, primary_key=True)
+    return_id = db.Column(db.Integer, db.ForeignKey('sale_returns.id', ondelete='CASCADE'), nullable=False)
+    sale_item_id = db.Column(db.Integer, db.ForeignKey('sale_items.id'), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+    unit_price = db.Column(db.Numeric(12, 2), nullable=False)
+    subtotal = db.Column(db.Numeric(12, 2), nullable=False)
 
 
 class SyncOutbox(db.Model):

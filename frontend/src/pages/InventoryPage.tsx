@@ -100,6 +100,7 @@ function AdjustStockContent({
     <div className="space-y-4">
       <div className="rounded-xl bg-canvas-subtle p-4 space-y-1">
         <p className="font-semibold text-sm">{row.product_name}</p>
+        <p className="text-sm text-foreground">{row.variant_name || '—'}</p>
         <p className="text-sm text-accent-600">{formatSkuLabel(row)}</p>
         <p className="text-xs text-muted font-mono">Barcode: {row.barcode}</p>
         <div className="flex gap-4 pt-2 text-sm">
@@ -235,15 +236,21 @@ export default function InventoryPage() {
     clearBarcode();
   }, [lastScannedBarcode, clearBarcode]);
 
-  const filtered = skuRows.filter(s =>
-    !search || s.product_name.toLowerCase().includes(search.toLowerCase()) ||
-    s.barcode.includes(search) || s.sku_code.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = skuRows.filter(s => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return s.product_name.toLowerCase().includes(q)
+      || (s.variant_name || '').toLowerCase().includes(q)
+      || s.barcode.includes(search)
+      || s.sku_code.toLowerCase().includes(q)
+      || formatSkuLabel(s).toLowerCase().includes(q);
+  });
 
   const stockColumns = [
     { key: 'product_name', header: 'Product', render: (s: SkuRow) => (
       <div className="min-w-[140px]">
         <p className="font-medium text-sm">{s.product_name}</p>
+        <p className="text-xs text-foreground font-medium">{s.variant_name || '—'}</p>
         <p className="text-xs text-accent-600 font-medium">{formatSkuLabel(s)}</p>
       </div>
     )},

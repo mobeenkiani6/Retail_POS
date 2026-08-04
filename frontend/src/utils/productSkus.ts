@@ -10,7 +10,6 @@ export type ProductSku = {
   display_label?: string;
   cost_price: number;
   selling_price: number;
-  wholesale_price?: number | null;
   tax_rate?: number;
   min_stock: number;
   max_stock?: number | null;
@@ -33,7 +32,6 @@ export type ProductSkuForm = {
   unit_abbr: string;
   cost_price: string;
   selling_price: string;
-  wholesale_price: string;
   min_stock: string;
   max_stock: string;
   reorder_level: string;
@@ -75,7 +73,6 @@ export function emptySkuForm(): ProductSkuForm {
     unit_abbr: 'ea',
     cost_price: '0',
     selling_price: '0',
-    wholesale_price: '',
     min_stock: '0',
     max_stock: '',
     reorder_level: '0',
@@ -97,7 +94,6 @@ export function skuToForm(s: ProductSku): ProductSkuForm {
     unit_abbr: s.unit_abbr || 'ea',
     cost_price: String(s.cost_price ?? 0),
     selling_price: String(s.selling_price ?? 0),
-    wholesale_price: s.wholesale_price != null ? String(s.wholesale_price) : '',
     min_stock: String(s.min_stock ?? 0),
     max_stock: s.max_stock != null ? String(s.max_stock) : '',
     reorder_level: String(s.reorder_level ?? 0),
@@ -129,7 +125,6 @@ export function skuFormToPayload(form: ProductSkuForm) {
     unit_abbr: form.unit_abbr.trim() || 'ea',
     cost_price: parseFloat(form.cost_price) || 0,
     selling_price: parseFloat(form.selling_price) || 0,
-    wholesale_price: form.wholesale_price ? parseFloat(form.wholesale_price) : null,
     min_stock: parseInt(form.min_stock, 10) || 0,
     max_stock: form.max_stock ? parseInt(form.max_stock, 10) : null,
     reorder_level: parseInt(form.reorder_level, 10) || 0,

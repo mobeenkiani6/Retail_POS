@@ -276,6 +276,135 @@ export default function GRNPage() {
     load();
   };
 
+  const printGrn = (g: GRN) => {
+    const escape = (v: unknown) =>
+      String(v ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+    const items = g.items || [];
+    const totalQty = items.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
+    const totalCost = items.reduce((sum, i) => sum + (Number(i.quantity) || 0) * (Number(i.cost_price) || 0), 0);
+    const created = g.created_at ? new Date(g.created_at).toLocaleString() : '—';
+    const statusLabel = (g.status || '—').replace(/_/g, ' ');
+
+    const rows = items.length
+      ? items.map((item, idx) => {
+          const lineTotal = (Number(item.quantity) || 0) * (Number(item.cost_price) || 0);
+          const name = item.product_name || products.find(p => p.id === item.product_id)?.name || `Product #${item.product_id}`;
+          const variant = item.sku_label ? ` (${item.sku_label})` : '';
+          return `<tr>
+            <td>${idx + 1}</td>
+            <td>${escape(name)}${escape(variant)}</td>
+            <td style="text-align:right">${Number(item.quantity) || 0}</td>
+            <td style="text-align:right">${formatCurrency(Number(item.cost_price) || 0)}</td>
+            <td style="text-align:right">${formatCurrency(Number(item.sell_price) || 0)}</td>
+            <td style="text-align:right">${formatCurrency(lineTotal)}</td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="6" style="text-align:center;color:#666">No line items</td></tr>';
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Receiving ${escape(g.grn_number)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #111; margin: 0; padding: 28px; background: #fff; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .muted { color: #555; font-size: 13px; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; margin: 20px 0; font-size: 13px; }
+    .meta strong { display: inline-block; min-width: 90px; color: #333; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { border: 1px solid #ccc; padding: 8px 10px; font-size: 12px; vertical-align: top; }
+    th { background: #f3f3f3; text-align: left; }
+    .totals { margin-top: 16px; width: 280px; margin-left: auto; font-size: 13px; }
+    .totals div { display: flex; justify-content: space-between; padding: 4px 0; }
+    .totals .grand { font-weight: 700; border-top: 1px solid #999; margin-top: 6px; padding-top: 8px; }
+    .notes { margin-top: 18px; font-size: 13px; white-space: pre-wrap; }
+    @media print {
+      body { padding: 12mm; }
+      @page { margin: 12mm; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Purchase Receiving</h1>
+  <p class="muted">Nycto Retail · Goods Received Note</p>
+  <div class="meta">
+    <div><strong>Reference</strong> ${escape(g.grn_number)}</div>
+    <div><strong>Status</strong> ${escape(statusLabel)}</div>
+    <div><strong>Supplier</strong> ${escape(g.supplier_name || '—')}</div>
+    <div><strong>Created</strong> ${escape(created)}</div>
+  </div>
+  ${g.notes ? `<div class="notes"><strong>Notes:</strong> ${escape(g.notes)}</div>` : ''}
+  <table>
+    <thead>
+      <tr>
+        <th style="width:40px">#</th>
+        <th>Product / Variant</th>
+        <th style="text-align:right;width:70px">Qty</th>
+        <th style="text-align:right;width:100px">Cost</th>
+        <th style="text-align:right;width:100px">Sell</th>
+        <th style="text-align:right;width:110px">Line Total</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div class="totals">
+    <div><span>Lines</span><span>${items.length}</span></div>
+    <div><span>Total Qty</span><span>${totalQty}</span></div>
+    <div class="grand"><span>Total Cost</span><span>${formatCurrency(totalCost)}</span></div>
+  </div>
+</body>
+</html>`;
+
+    // Hidden iframe print — avoids popup blockers / noopener blank windows
+    const iframe = document.createElement('iframe');
+    iframe.setAttribute('title', `Print ${g.grn_number}`);
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;';
+    document.body.appendChild(iframe);
+
+    const cleanup = () => {
+      window.setTimeout(() => {
+        try { document.body.removeChild(iframe); } catch { /* ignore */ }
+      }, 1000);
+    };
+
+    const win = iframe.contentWindow;
+    const doc = win?.document;
+    if (!win || !doc) {
+      cleanup();
+      showToast('Print not available in this browser', 'error');
+      return;
+    }
+
+    doc.open();
+    doc.write(html);
+    doc.close();
+
+    const doPrint = () => {
+      try {
+        win.focus();
+        win.print();
+      } catch {
+        showToast('Could not open print dialog', 'error');
+      } finally {
+        cleanup();
+      }
+    };
+
+    // Wait for document to be ready before printing
+    if (doc.readyState === 'complete') {
+      requestAnimationFrame(() => setTimeout(doPrint, 100));
+    } else {
+      iframe.onload = () => requestAnimationFrame(() => setTimeout(doPrint, 100));
+    }
+  };
+
   return (
     <div className="flex-1 overflow-auto p-6 lg:p-8">
       <PageHeader
@@ -308,7 +437,7 @@ export default function GRNPage() {
                 </>
               )}
               <button type="button" onClick={() => duplicateGrn(g.id)} className="p-1.5 rounded-lg hover:bg-canvas-subtle text-muted" title="Duplicate"><Copy className="w-3.5 h-3.5" /></button>
-              <button type="button" onClick={() => window.print()} className="p-1.5 rounded-lg hover:bg-canvas-subtle text-muted" title="Print"><Printer className="w-3.5 h-3.5" /></button>
+              <button type="button" onClick={() => printGrn(g)} className="p-1.5 rounded-lg hover:bg-canvas-subtle text-muted" title="Print"><Printer className="w-3.5 h-3.5" /></button>
             </div>
           );
         }}

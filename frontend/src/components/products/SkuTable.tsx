@@ -1,10 +1,14 @@
+import { useEffect, useState } from 'react';
 import { Plus, Trash2, Copy, Barcode, Hash } from 'lucide-react';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
-import { post } from '../../api';
+import Modal from '../ui/Modal';
+import { get, post, getUserMessage } from '../../api';
+import { showToast } from '../Toast';
 import { emptySkuForm, formatSkuLabel, type ProductSkuForm } from '../../utils/productSkus';
 
 type UnitOption = { id: number; name: string; abbreviation?: string };
+type VariantOption = { id: number; name: string; active?: boolean; archived_at?: string | null };
 
 type Props = {
   skus: ProductSkuForm[];
@@ -26,13 +30,30 @@ function Field({
   );
 }
 
+const ADD_NEW_VALUE = '__add_new_variant__';
+
 export default function SkuTable({ skus, onChange, units, productName, productId, isEditing }: Props) {
+  const [variantOptions, setVariantOptions] = useState<VariantOption[]>([]);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForIdx, setAddForIdx] = useState<number | null>(null);
+  const [newVariantName, setNewVariantName] = useState('');
+  const [savingVariant, setSavingVariant] = useState(false);
+
+  const loadVariants = () => {
+    get<{ variant_options?: VariantOption[] }>('/v1/variant-options/')
+      .then(d => setVariantOptions((d?.variant_options ?? []).filter(v => v.active !== false && !v.archived_at)))
+      .catch(() => {});
+  };
+
+  useEffect(() => { loadVariants(); }, []);
+
   const updateSku = (idx: number, patch: Partial<ProductSkuForm>) => {
     onChange(skus.map((s, i) => i === idx ? { ...s, ...patch } : s));
   };
 
   const addSku = async () => {
     const row = emptySkuForm();
+    if (variantOptions[0]?.name) row.variant_name = variantOptions[0].name;
     try {
       const [bc, code] = await Promise.all([
         post<{ barcode: string }>('/products/generate-barcode', {}),
@@ -46,7 +67,7 @@ export default function SkuTable({ skus, onChange, units, productName, productId
 
   const duplicateSku = async (idx: number) => {
     const src = skus[idx];
-    const row = { ...src, id: undefined, variant_name: `${src.variant_name} (Copy)` };
+    const row = { ...src, id: undefined, variant_name: src.variant_name };
     try {
       const bc = await post<{ barcode: string }>('/products/generate-barcode', {});
       row.barcode = bc.barcode;
@@ -71,6 +92,47 @@ export default function SkuTable({ skus, onChange, units, productName, productId
     } catch { /* ignore */ }
   };
 
+  const onVariantSelect = (idx: number, value: string) => {
+    if (value === ADD_NEW_VALUE) {
+      setAddForIdx(idx);
+      setNewVariantName('');
+      setAddOpen(true);
+      return;
+    }
+    updateSku(idx, { variant_name: value });
+  };
+
+  const saveNewVariant = async () => {
+    const name = newVariantName.trim();
+    if (!name) {
+      showToast('Variant name is required', 'error');
+      return;
+    }
+    setSavingVariant(true);
+    try {
+      const existing = variantOptions.find(v => v.name.toLowerCase() === name.toLowerCase());
+      if (existing) {
+        if (addForIdx != null) updateSku(addForIdx, { variant_name: existing.name });
+        setAddOpen(false);
+        return;
+      }
+      const res = await post<{ variant_option?: VariantOption }>('/v1/variant-options/', { name, active: true });
+      const created = res?.variant_option;
+      if (created) {
+        setVariantOptions(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+        if (addForIdx != null) updateSku(addForIdx, { variant_name: created.name });
+        showToast('Variant added', 'success');
+      }
+      setAddOpen(false);
+    } catch (e) {
+      showToast(getUserMessage(e), 'error');
+    } finally {
+      setSavingVariant(false);
+    }
+  };
+
+  const variantNames = new Set(variantOptions.map(v => v.name));
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
@@ -94,12 +156,15 @@ export default function SkuTable({ skus, onChange, units, productName, productId
               unit_abbr: sku.unit_abbr,
               variant_name: sku.variant_name,
             });
+            const currentName = sku.variant_name || '';
             return (
               <div key={sku.id != null ? `sku-${sku.id}` : `new-${idx}`} className="rounded-xl border border-border bg-canvas-subtle/40 p-4 space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold text-foreground">SKU #{idx + 1}</p>
-                    <p className="text-xs text-accent-600">{preview}</p>
+                    <p className="text-xs text-accent-600">
+                      {currentName ? `${currentName} · ${preview}` : preview}
+                    </p>
                   </div>
                   <div className="flex gap-1 shrink-0">
                     <button type="button" onClick={() => generateBarcode(idx)} title="Generate barcode" className="p-1.5 rounded-lg hover:bg-surface border border-border text-muted"><Barcode className="w-3.5 h-3.5" /></button>
@@ -111,7 +176,20 @@ export default function SkuTable({ skus, onChange, units, productName, productId
 
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <Field label="Variant Name">
-                    <Input value={sku.variant_name} onChange={e => updateSku(idx, { variant_name: e.target.value })} placeholder="Bottle" />
+                    <select
+                      value={currentName}
+                      onChange={e => onVariantSelect(idx, e.target.value)}
+                      className="input-base w-full"
+                    >
+                      <option value="">Select variant</option>
+                      {variantOptions.map(v => (
+                        <option key={v.id} value={v.name}>{v.name}</option>
+                      ))}
+                      {currentName && !variantNames.has(currentName) && (
+                        <option value={currentName}>{currentName}</option>
+                      )}
+                      <option value={ADD_NEW_VALUE}>+ Add new variant…</option>
+                    </select>
                   </Field>
                   <Field label="Quantity">
                     <Input type="number" min="0" step="any" value={sku.quantity_value} onChange={e => updateSku(idx, { quantity_value: e.target.value })} placeholder="250" className="min-w-0" />
@@ -145,15 +223,12 @@ export default function SkuTable({ skus, onChange, units, productName, productId
                   </Field>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <Field label="Purchase Price">
                     <Input type="number" min="0" step="0.01" value={sku.cost_price} onChange={e => updateSku(idx, { cost_price: e.target.value })} />
                   </Field>
                   <Field label="Selling Price">
                     <Input type="number" min="0" step="0.01" value={sku.selling_price} onChange={e => updateSku(idx, { selling_price: e.target.value })} />
-                  </Field>
-                  <Field label="Wholesale">
-                    <Input type="number" min="0" step="0.01" value={sku.wholesale_price} onChange={e => updateSku(idx, { wholesale_price: e.target.value })} placeholder="Optional" />
                   </Field>
                   {!isEditing && (
                     <Field label="Initial Stock">
@@ -166,6 +241,31 @@ export default function SkuTable({ skus, onChange, units, productName, productId
           })}
         </div>
       )}
+
+      <Modal
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        title="Add Variant"
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setAddOpen(false)}>Cancel</Button>
+            <Button onClick={saveNewVariant} disabled={savingVariant}>
+              {savingVariant ? 'Saving…' : 'Add Variant'}
+            </Button>
+          </>
+        }
+      >
+        <Input
+          label="Variant Name *"
+          value={newVariantName}
+          onChange={e => setNewVariantName(e.target.value)}
+          placeholder="e.g. Small, Large, Bottle"
+          autoFocus
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveNewVariant(); } }}
+        />
+        <p className="text-xs text-muted mt-2">This will also appear under Settings → Variants.</p>
+      </Modal>
     </div>
   );
 }

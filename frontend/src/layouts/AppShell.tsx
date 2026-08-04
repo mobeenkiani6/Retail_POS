@@ -4,14 +4,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, ShoppingCart, Package, ClipboardList,
   BarChart3, Truck, Settings, LogOut, Bell, Moon, Sun,
-  Users, FileBarChart, ChevronRight, Warehouse,
+  Users, FileBarChart, ChevronRight, Warehouse, History,
 } from 'lucide-react';
 import { useTheme } from '../hooks/useTheme';
 import { get, patch } from '../api';
 
 const navItems = [
   { icon: LayoutDashboard, path: '/operations', label: 'Dashboard', roles: ['owner', 'manager', 'cashier', 'inventory_manager'] },
-  { icon: ShoppingCart, path: '/checkout', label: 'Checkout', roles: ['owner', 'manager', 'cashier'] },
+  { icon: ShoppingCart, path: '/checkout', label: 'New Sale', roles: ['owner', 'manager', 'cashier'] },
+  { icon: History, path: '/previous-orders', label: 'Previous Orders', roles: ['owner', 'manager', 'cashier'] },
   { icon: Package, path: '/grocery-products', label: 'Products', roles: ['owner', 'manager', 'inventory_manager'] },
   { icon: Warehouse, path: '/inventory', label: 'Inventory', roles: ['owner', 'manager', 'inventory_manager', 'cashier'] },
   { icon: ClipboardList, path: '/grn', label: 'Receiving', roles: ['owner', 'manager', 'inventory_manager'] },

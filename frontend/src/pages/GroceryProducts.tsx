@@ -275,7 +275,11 @@ export default function GroceryProducts() {
                     {isOpen && skus.map((sku: ProductSku) => (
                       <tr key={`${p.id}-sku-${sku.id}`} className="bg-canvas-subtle/40 border-b border-border/50">
                         <td colSpan={8} className="px-4 py-3">
-                          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pl-8 text-sm">
+                          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 pl-8 text-sm">
+                            <div>
+                              <p className="text-[10px] uppercase text-muted font-semibold">Variant</p>
+                              <p className="font-medium">{sku.variant_name || '—'}</p>
+                            </div>
                             <div>
                               <p className="text-[10px] uppercase text-muted font-semibold">Pack Size</p>
                               <p className="font-medium">{formatSkuLabel(sku)}</p>
