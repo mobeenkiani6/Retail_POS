@@ -133,7 +133,7 @@ def adjust_inventory(current_user):
     variant = (data.get('variant') or '').strip()
     quantity_delta = int(data.get('quantity_delta', data.get('stock_delta', 0)))
     reason = data.get('reason') or data.get('movement_type', 'adjustment')
-    notes = data.get('notes') or data.get('reason', '')
+    notes = data.get('notes') if data.get('notes') is not None else ''
 
     if sku_id:
         sku = ProductSku.query.get(int(sku_id))

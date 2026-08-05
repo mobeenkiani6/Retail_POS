@@ -8,9 +8,10 @@ import UnitsSettings from '../components/settings/UnitsSettings';
 import BrandsSettings from '../components/settings/BrandsSettings';
 import VariantsSettings from '../components/settings/VariantsSettings';
 import SuppliersSettings from '../components/settings/SuppliersSettings';
+import HardwareSettings from '../components/settings/HardwareSettings';
 import { useTheme } from '../hooks/useTheme';
 import appLogger, { type LogEntry } from '../utils/logger';
-import { get, put, post, getUserMessage } from '../api';
+import { get, put, getUserMessage } from '../api';
 import { showConfirm } from '../components/ConfirmDialog';
 import { getBranchId } from '../branch';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -23,12 +24,10 @@ export default function Settings() {
     taxEnabled,
     taxPercentage,
     taxRatesByPaymentMethod,
-    hardware,
     setActiveTab,
     setTaxEnabled,
     setTaxPercentage,
     setTaxRatesByPaymentMethod,
-    setHardware,
   } = useSettingsStore();
   const { theme, setTheme, isDark } = useTheme();
 
@@ -36,11 +35,6 @@ export default function Settings() {
   const [taxSaving, setTaxSaving] = useState(false);
   const [taxFeedback, setTaxFeedback] = useState('');
   const PAYMENT_METHODS = ['Cash', 'Card'];
-
-  const [hardwareLoading, setHardwareLoading] = useState(false);
-  const [hardwareSaving, setHardwareSaving] = useState(false);
-  const [hardwareFeedback, setHardwareFeedback] = useState('');
-  const [testPrintLoading, setTestPrintLoading] = useState(false);
 
   // ── Discounts state ──
   type DiscountItem = { id: string; name: string; type: 'percent' | 'fixed'; value: number; archived?: boolean };
@@ -77,8 +71,6 @@ export default function Settings() {
   useEffect(() => {
     if (activeTab === 'taxrates') {
       fetchTaxSettings();
-    } else if (activeTab === 'hardware') {
-      fetchHardwareSettings();
     } else if (activeTab === 'discounts') {
       fetchDiscounts();
     }
@@ -217,57 +209,6 @@ export default function Settings() {
     }
   };
 
-  const fetchHardwareSettings = async () => {
-    setHardwareLoading(true);
-    try {
-      const data = await get<SettingsResponse>('/settings/?global_only=1');
-      const h = data.config?.hardware as { printer_vendor_id?: string; printer_product_id?: string; paper_width?: string } | undefined;
-      setHardware({
-        printer_vendor_id: h?.printer_vendor_id ?? '',
-        printer_product_id: h?.printer_product_id ?? '',
-        paper_width: h?.paper_width ?? '80mm',
-      });
-    } catch {
-      setHardware({ printer_vendor_id: '', printer_product_id: '', paper_width: '80mm' });
-    } finally {
-      setHardwareLoading(false);
-    }
-  };
-
-  const saveHardwareSettings = async () => {
-    setHardwareSaving(true);
-    setHardwareFeedback('');
-    try {
-      const existing = await get<SettingsResponse>('/settings/?global_only=1');
-      const currentConfig = (existing?.config ?? {}) as Record<string, unknown>;
-      await put('/settings/', { config: { ...currentConfig, hardware }, branch_id: null });
-      setHardwareFeedback('Hardware settings saved!');
-      setTimeout(() => setHardwareFeedback(''), 2000);
-    } catch (e) {
-      setHardwareFeedback('error:' + getUserMessage(e));
-    } finally {
-      setHardwareSaving(false);
-    }
-  };
-
-  const handleTestPrint = async () => {
-    setTestPrintLoading(true);
-    setHardwareFeedback('');
-    try {
-      await saveHardwareSettings();
-      const data = await post<{ success?: boolean; message?: string }>('/printer/test-print', {});
-      if (data?.success) {
-        setHardwareFeedback('Test print job sent successfully!');
-      } else {
-        setHardwareFeedback('error:' + (data?.message ?? 'Printer not reachable'));
-      }
-    } catch (e) {
-      setHardwareFeedback('error:' + getUserMessage(e));
-    } finally {
-      setTestPrintLoading(false);
-    }
-  };
-
   return (
     <div className="flex h-full bg-surface rounded-xl shadow-soft border border-border overflow-hidden m-4 lg:m-6">
       <div className="w-64 bg-canvas-subtle border-r border-border p-4 shrink-0 overflow-y-auto scroll-smooth">
@@ -316,107 +257,7 @@ export default function Settings() {
         {activeTab === 'users' && <UsersSettings />}
         {activeTab === 'branch' && <BranchesSettings />}
 
-        {activeTab === 'hardware' && (
-          <div className="max-w-2xl">
-            <h3 className="text-2xl font-bold text-foreground mb-6">Hardware Configuration</h3>
-            <div className="space-y-6">
-              <div className="bg-canvas-subtle p-6 rounded-xl border border-border">
-                <h4 className="font-semibold text-foreground mb-4">Thermal Printer (USB ESC/POS)</h4>
-                
-                {hardwareLoading ? (
-                  <div className="flex items-center gap-2 text-muted py-6">
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    Loading hardware config…
-                  </div>
-                ) : (
-                  <>
-                    <p className="text-sm text-muted mb-4">Connect your thermal receipt printer via USB to the POS terminal. Enter the USB Vendor ID and Product ID below (hex values).</p>
-                    <div className="grid grid-cols-2 gap-4">
-                   <div>
-                     <label className="block text-sm font-medium text-foreground-secondary mb-1">USB Vendor ID</label>
-                     <input 
-                       type="text"
-                       inputMode="text"
-                       value={hardware.printer_vendor_id}
-                       onChange={e => setHardware({ ...hardware, printer_vendor_id: e.target.value })}
-                       placeholder="e.g. 0x04b8" 
-                       className="w-full px-4 py-3 border border-border rounded-lg font-mono focus:ring-2 focus:ring-accent-500 focus:outline-none" 
-                     />
-                     <p className="text-xs text-muted mt-1">Hex value, e.g. 0x04b8 for Epson</p>
-                   </div>
-                   <div>
-                     <label className="block text-sm font-medium text-foreground-secondary mb-1">USB Product ID</label>
-                     <input 
-                       type="text"
-                       inputMode="text"
-                       value={hardware.printer_product_id}
-                       onChange={e => setHardware({ ...hardware, printer_product_id: e.target.value })}
-                       placeholder="e.g. 0x0202" 
-                       className="w-full px-4 py-3 border border-border rounded-lg font-mono focus:ring-2 focus:ring-accent-500 focus:outline-none" 
-                     />
-                     <p className="text-xs text-muted mt-1">Hex value, e.g. 0x0202 for TM-T88</p>
-                   </div>
-                </div>
-                <div className="mt-4">
-                   <div>
-                     <label className="block text-sm font-medium text-foreground-secondary mb-1">Paper Width</label>
-                     <select 
-                       value={hardware.paper_width}
-                       onChange={e => setHardware({ ...hardware, paper_width: e.target.value })}
-                       className="w-full px-4 py-3 border border-border rounded-lg focus:ring-2 focus:ring-accent-500 focus:outline-none"
-                     >
-                       <option value="80mm">80mm</option>
-                       <option value="58mm">58mm</option>
-                     </select>
-                   </div>
-                </div>
-
-                {hardwareFeedback && (
-                  <div className={`mt-6 text-sm font-medium rounded-lg px-4 py-3 border ${
-                    hardwareFeedback.startsWith('error:')
-                      ? 'bg-red-50 text-red-700 border-red-200'
-                      : 'bg-accent-500/10 text-accent-600 border-accent-500/30'
-                  }`}>
-                    {hardwareFeedback.replace('error:', '')}
-                  </div>
-                )}
-
-                <div className="mt-6 flex flex-wrap gap-3">
-                  <button 
-                    onClick={saveHardwareSettings}
-                    disabled={hardwareSaving}
-                    className="bg-accent-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-accent-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm flex items-center gap-2"
-                  >
-                    {hardwareSaving && <Loader2 className="w-4 h-4 animate-spin" />}
-                    Save Hardware Config
-                  </button>
-                  <button 
-                    onClick={handleTestPrint}
-                    disabled={testPrintLoading || hardwareSaving}
-                    className="bg-surface border text-foreground-secondary border-border px-6 py-2 rounded-lg text-sm font-medium hover:bg-canvas-subtle disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-                  >
-                    {testPrintLoading && <Loader2 className="w-4 h-4 animate-spin text-muted" />}
-                    Test Print Connection
-                  </button>
-                </div>
-                </>
-              )}
-              </div>
-
-              <div className="bg-canvas-subtle p-6 rounded-xl border border-border text-sm">
-                <h4 className="font-semibold text-foreground mb-2 border-b border-border pb-2">Barcode Scanner Tips</h4>
-                <p className="text-muted mb-3">
-                  This POS supports standard USB barcode scanners acting as a <strong>keyboard wedge</strong>. 
-                </p>
-                <ul className="list-disc pl-5 space-y-1 text-muted">
-                   <li>Ensure the scanner is connected via USB to the POS terminal.</li>
-                   <li>The scanner must be configured to append a <strong>Carriage Return (Enter)</strong> after scanning payloads.</li>
-                   <li>No special driver installation is required within the app. Just plug, and start scanning!</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        )}
+        {activeTab === 'hardware' && <HardwareSettings />}
 
         {/* ───────── Categories Management ───────── */}
         {activeTab === 'categories' && (

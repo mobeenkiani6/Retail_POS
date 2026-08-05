@@ -4,7 +4,7 @@ import { useScanner } from '../hooks/useScanner';
 import {
   ShoppingBag, Plus, Minus, Trash2, Loader2, CreditCard, Banknote,
   Pause, Play, RotateCcw, Usb, User, Tag, Percent, StickyNote,
-  Eye, X, Keyboard, ChevronDown, Star,
+  Eye, Keyboard, Star,
 } from 'lucide-react';
 import { formatCurrency } from '../utils/formatCurrency';
 import { get, post, getUserMessage } from '../api';
@@ -94,7 +94,6 @@ export default function Checkout() {
   const [qtyEditId, setQtyEditId] = useState<string | null>(null);
   const [qtyEditValue, setQtyEditValue] = useState('');
   const [skuPickerProduct, setSkuPickerProduct] = useState<Product | null>(null);
-  const [cartSkuEdit, setCartSkuEdit] = useState<{ uniqueId: string; product: Product } | null>(null);
 
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const branchId = getBranchId();
@@ -235,10 +234,7 @@ export default function Checkout() {
       showToast(`Only ${sku.stock_level} available for ${label}`, 'error');
       return;
     }
-    if (newUid === uniqueId) {
-      setCartSkuEdit(null);
-      return;
-    }
+    if (newUid === uniqueId) return;
 
     setCart(prev => {
       const existingTarget = prev.find(i => i.uniqueId === newUid && !i.voided && i.uniqueId !== uniqueId);
@@ -263,22 +259,7 @@ export default function Checkout() {
       });
     });
 
-    setCartSkuEdit(null);
     showToast(`Changed to ${label}`, 'success');
-  };
-
-  const openCartVariantPicker = (item: CartItem) => {
-    const product = products.find(p => p.id === item.product_id);
-    if (!product) {
-      showToast('Product not found', 'error');
-      return;
-    }
-    const skus = getProductSkus(product);
-    if (skus.length <= 1) {
-      showToast('No other pack sizes for this product', 'info');
-      return;
-    }
-    setCartSkuEdit({ uniqueId: item.uniqueId, product });
   };
 
   // Keyboard shortcuts
@@ -321,10 +302,6 @@ export default function Checkout() {
   const setManualQty = (uid: string, qty: number) => {
     if (qty <= 0) setCart(c => c.filter(i => i.uniqueId !== uid));
     else setCart(c => c.map(i => i.uniqueId === uid ? { ...i, quantity: qty } : i));
-  };
-
-  const voidItem = (uid: string) => {
-    setCart(c => c.map(i => i.uniqueId === uid ? { ...i, voided: true } : i));
   };
 
   const snapshotReceipt = (): ReceiptSnapshot => ({
@@ -600,21 +577,45 @@ export default function Checkout() {
                         {(() => {
                           const product = products.find(p => p.id === item.product_id);
                           const skus = product ? getProductSkus(product) : [];
-                          const hasVariants = skus.length > 1;
-                          return hasVariants ? (
-                            <button
-                              type="button"
-                              onClick={() => openCartVariantPicker(item)}
-                              className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-accent-500/10 text-accent-600 hover:bg-accent-500/20 transition-colors"
-                              title="Change pack size"
-                            >
-                              {item.variant || 'Standard'}
-                              <ChevronDown className="w-3 h-3" />
-                            </button>
-                          ) : item.variant ? (
-                            <span className="text-[10px] text-muted">{item.variant}</span>
-                          ) : (
-                            <span className="text-[10px] text-muted">{item.quantity < 0 ? 'RETURN' : item.sku_id ? `SKU #${item.sku_id}` : `Product #${item.product_id}`}</span>
+                          if (skus.length > 1 && product && !item.voided) {
+                            return (
+                              <select
+                                value={item.sku_id != null ? String(item.sku_id) : ''}
+                                onChange={e => {
+                                  const sku = skus.find(s => String(s.id) === e.target.value);
+                                  if (sku) changeCartItemSku(item.uniqueId, product, sku);
+                                }}
+                                className="max-w-[11rem] text-[10px] font-medium pl-1.5 pr-6 py-0.5 rounded-md border-0 bg-accent-500/10 text-accent-600 focus:outline-none focus:ring-1 focus:ring-accent-500/40 appearance-none bg-[length:0.7rem] bg-[right_0.35rem_center] bg-no-repeat cursor-pointer"
+                                style={{
+                                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+                                }}
+                                title="Change pack size"
+                              >
+                                {skus.map(sku => {
+                                  const stock = sku.stock_level ?? 0;
+                                  const out = !returnMode && stock <= 0;
+                                  const insufficient = !returnMode && !out && stock < Math.abs(item.quantity);
+                                  return (
+                                    <option
+                                      key={sku.id}
+                                      value={sku.id}
+                                      disabled={out || insufficient}
+                                    >
+                                      {formatSkuLabel(sku)} · {formatCurrency(sku.selling_price)}
+                                      {out ? ' (out)' : insufficient ? ` (${stock} left)` : ''}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            );
+                          }
+                          if (item.variant) {
+                            return <span className="text-[10px] text-muted">{item.variant}</span>;
+                          }
+                          return (
+                            <span className="text-[10px] text-muted">
+                              {item.quantity < 0 ? 'RETURN' : item.sku_id ? `SKU #${item.sku_id}` : `Product #${item.product_id}`}
+                            </span>
                           );
                         })()}
                         {item.quantity < 0 && <span className="text-[10px] text-warning font-medium">RETURN</span>}
@@ -622,10 +623,14 @@ export default function Checkout() {
                     </div>
                     <div className="flex gap-0.5 shrink-0">
                       {!item.voided && (
-                        <>
-                          <button onClick={() => voidItem(item.uniqueId)} className="p-1 rounded text-muted hover:text-warning" title="Void"><X className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => setCart(c => c.filter(i => i.uniqueId !== item.uniqueId))} className="p-1 rounded text-muted hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
-                        </>
+                        <button
+                          type="button"
+                          onClick={() => setCart(c => c.filter(i => i.uniqueId !== item.uniqueId))}
+                          className="p-1 rounded text-muted hover:text-danger"
+                          title="Remove"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       )}
                     </div>
                   </div>
@@ -815,56 +820,6 @@ export default function Checkout() {
             );})}
           </div>
         )}
-      </Modal>
-
-      {/* Cart variant modifier modal */}
-      <Modal
-        open={!!cartSkuEdit}
-        onClose={() => setCartSkuEdit(null)}
-        title={cartSkuEdit ? `Change pack size — ${cartSkuEdit.product.name}` : 'Change variant'}
-        size="sm"
-      >
-        {cartSkuEdit && (() => {
-          const currentItem = cart.find(i => i.uniqueId === cartSkuEdit.uniqueId);
-          return (
-            <div className="grid grid-cols-2 gap-2">
-              {getProductSkus(cartSkuEdit.product).map(sku => {
-                const stock = sku.stock_level ?? 0;
-                const out = !returnMode && stock <= 0;
-                const isCurrent = currentItem?.sku_id === sku.id;
-                const qtyNeeded = currentItem?.quantity ?? 1;
-                const insufficient = !returnMode && !out && stock < qtyNeeded;
-                const disabled = out || insufficient;
-                return (
-                  <button
-                    key={sku.id}
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => !disabled && changeCartItemSku(cartSkuEdit.uniqueId, cartSkuEdit.product, sku)}
-                    className={`p-3 rounded-xl border text-left transition-colors ${
-                      isCurrent
-                        ? 'border-accent-600 bg-accent-500/10 ring-1 ring-accent-600/30'
-                        : disabled
-                          ? 'cursor-not-allowed border-border bg-canvas-subtle/40 opacity-60'
-                          : 'border-border hover:border-accent-400 hover:bg-accent-500/5'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-1">
-                      <p className="font-semibold text-sm text-foreground">{formatSkuLabel(sku)}</p>
-                      {isCurrent && <Badge variant="default">Current</Badge>}
-                    </div>
-                    <p className="text-accent-600 dark:text-accent-400 font-bold text-sm mt-1">{formatCurrency(sku.selling_price)}</p>
-                    {!returnMode && (
-                      <p className={`text-[10px] mt-0.5 ${out ? 'text-danger font-medium' : insufficient ? 'text-warning' : 'text-muted'}`}>
-                        {out ? 'Out of stock' : insufficient ? `Only ${stock} available` : `${stock} in stock`}
-                      </p>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          );
-        })()}
       </Modal>
 
       {/* Customer modal */}

@@ -15,6 +15,8 @@ products_bp = Blueprint('products', __name__)
 PARENT_FIELDS = (
     'description', 'category_id', 'brand_id', 'supplier_id',
     'image_url', 'tax_rate', 'requires_expiry', 'notes', 'status',
+    'sku', 'unit', 'unit_id', 'min_stock', 'reorder_qty',
+    'carton_qty', 'carton_unit', 'packet_qty', 'packet_unit',
 )
 
 
@@ -53,6 +55,15 @@ def _product_to_dict(product, branch_id=None, include_skus=True):
         'brand': _brand_name(product),
         'supplier_id': getattr(product, 'supplier_id', None),
         'supplier_name': product.supplier.name if getattr(product, 'supplier', None) else None,
+        'sku': getattr(product, 'sku', None) or '',
+        'unit': getattr(product, 'unit', None) or '',
+        'unit_id': getattr(product, 'unit_id', None),
+        'carton_qty': float(getattr(product, 'carton_qty', 0) or 0),
+        'carton_unit': getattr(product, 'carton_unit', None) or '',
+        'packet_qty': float(getattr(product, 'packet_qty', 0) or 0),
+        'packet_unit': getattr(product, 'packet_unit', None) or '',
+        'min_stock': int(getattr(product, 'min_stock', 0) or 0),
+        'reorder_qty': int(getattr(product, 'reorder_qty', 0) or 0),
         'image_url': product.image_url or '',
         'tax_rate': float(getattr(product, 'tax_rate', 0) or 0),
         'requires_expiry': product.requires_expiry,
@@ -88,12 +99,37 @@ def _parse_parent_payload(data, *, partial=False):
         except (TypeError, ValueError):
             return None
 
+    def _float(v, default=0):
+        try:
+            if v in (None, ''):
+                return default
+            return float(v)
+        except (TypeError, ValueError):
+            return default
+
+    unit_id = _int_or_none(data.get('unit_id'))
+    unit_abbr = (data.get('unit') or data.get('unit_abbr') or '').strip() or None
+    if unit_id and not unit_abbr:
+        from app.models import Unit
+        u = Unit.query.get(unit_id)
+        if u:
+            unit_abbr = u.abbreviation or u.name
+
     parsed = {
         'name': name,
         'description': (data.get('description') or '').strip() or None,
         'category_id': _int_or_none(data.get('category_id')),
         'brand_id': _int_or_none(data.get('brand_id')),
         'supplier_id': _int_or_none(data.get('supplier_id')),
+        'sku': (data.get('sku') or '').strip() or None,
+        'unit_id': unit_id,
+        'unit': unit_abbr,
+        'carton_qty': _float(data.get('carton_qty'), 0),
+        'carton_unit': (data.get('carton_unit') or unit_abbr or '').strip() or None,
+        'packet_qty': _float(data.get('packet_qty'), 0),
+        'packet_unit': (data.get('packet_unit') or unit_abbr or '').strip() or None,
+        'min_stock': _int_or_none(data.get('min_stock')) or 0,
+        'reorder_qty': _int_or_none(data.get('reorder_qty')) or 0,
         'image_url': (data.get('image_url') or '').strip() or '',
         'tax_rate': tax_rate,
         'requires_expiry': bool(data.get('requires_expiry', False)),
@@ -378,6 +414,14 @@ def duplicate_product(current_user, product_id):
         category_id=product.category_id,
         brand_id=product.brand_id,
         supplier_id=product.supplier_id,
+        unit=product.unit,
+        unit_id=product.unit_id,
+        carton_qty=getattr(product, 'carton_qty', 0) or 0,
+        carton_unit=getattr(product, 'carton_unit', None),
+        packet_qty=getattr(product, 'packet_qty', 0) or 0,
+        packet_unit=getattr(product, 'packet_unit', None),
+        min_stock=product.min_stock,
+        reorder_qty=product.reorder_qty,
         image_url=product.image_url,
         tax_rate=product.tax_rate,
         requires_expiry=product.requires_expiry,

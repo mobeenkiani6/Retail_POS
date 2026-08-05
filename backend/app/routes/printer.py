@@ -15,12 +15,12 @@ def printer_status(current_user):
         if connected:
             return jsonify({
                 'status': 'connected',
-                'message': 'USB printer is connected and ready'
+                'message': 'Printer is connected and ready'
             }), 200
         else:
             return jsonify({
                 'status': 'disconnected',
-                'message': 'USB printer not found or not configured'
+                'message': 'Printer not found or not configured'
             }), 200
     except Exception as e:
         return jsonify({
@@ -56,7 +56,7 @@ def test_print(current_user):
         if success:
             return jsonify({'success': True, 'message': 'Test print completed'}), 200
         else:
-            return jsonify({'success': False, 'message': 'Failed to print. Check USB connection.'}), 503
+            return jsonify({'success': False, 'message': 'Failed to print. Check printer connection (LAN IP/port or USB IDs).'}), 503
             
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500

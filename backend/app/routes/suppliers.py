@@ -5,7 +5,7 @@ from app.models import db, Supplier, GoodsReceivedNote, SupplierLedgerEntry, Use
 from app.utils.auth_decorators import token_required, role_required
 from app.errors import error_response
 from app.services.supplier_ledger_service import (
-    ensure_supplier_code, post_payment, post_return, apply_opening_balance,
+    ensure_supplier_code, post_payment, post_purchase, post_return, apply_opening_balance,
 )
 
 suppliers_bp = Blueprint('suppliers', __name__)
@@ -315,6 +315,18 @@ def get_ledger(current_user, supplier_id):
     }), 200
 
 
+def _parse_entry_date(data):
+    """Optional YYYY-MM-DD → datetime (noon UTC+5 local ≈ morning UTC)."""
+    raw = (data.get('date') or data.get('entry_date') or '').strip()
+    if not raw:
+        return None
+    try:
+        d = datetime.strptime(raw[:10], '%Y-%m-%d')
+        return d.replace(hour=7, minute=0, second=0)  # ~noon PKT
+    except ValueError:
+        return None
+
+
 @suppliers_bp.route('/<int:supplier_id>/payments', methods=['POST'])
 @token_required
 @role_required('owner', 'manager', 'inventory_manager')
@@ -342,10 +354,44 @@ def record_payment(current_user, supplier_id):
             reference_number=(data.get('reference_number') or data.get('reference') or '').strip() or None,
             notes=(data.get('notes') or '').strip() or None,
             user_id=current_user.id,
+            created_at=_parse_entry_date(data),
             commit=True,
         )
         return jsonify({
             'message': 'Payment recorded',
+            'entry': _entry_dict(entry),
+            'supplier': _supplier_dict(supplier, include_totals=True),
+        }), 201
+    except ValueError as e:
+        db.session.rollback()
+        return error_response('Bad Request', str(e), 400)
+
+
+@suppliers_bp.route('/<int:supplier_id>/purchases', methods=['POST'])
+@token_required
+@role_required('owner', 'manager', 'inventory_manager')
+def record_purchase(current_user, supplier_id):
+    """Manual purchase / invoice entry (increases balance due)."""
+    supplier = Supplier.query.get_or_404(supplier_id)
+    data = request.get_json() or {}
+    try:
+        amount = float(data.get('amount') or 0)
+    except (TypeError, ValueError):
+        return error_response('Bad Request', 'Invalid amount', 400)
+    if amount <= 0:
+        return error_response('Bad Request', 'Amount must be positive', 400)
+
+    try:
+        entry = post_purchase(
+            supplier.id, amount,
+            reference_number=(data.get('reference_number') or data.get('reference') or '').strip() or None,
+            notes=(data.get('notes') or '').strip() or None,
+            user_id=current_user.id,
+            created_at=_parse_entry_date(data),
+            commit=True,
+        )
+        return jsonify({
+            'message': 'Purchase recorded',
             'entry': _entry_dict(entry),
             'supplier': _supplier_dict(supplier, include_totals=True),
         }), 201

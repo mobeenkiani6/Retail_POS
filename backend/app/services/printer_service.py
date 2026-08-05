@@ -1,8 +1,9 @@
 import base64
 import io
 import re
-from escpos.printer import Usb
+from escpos.printer import Usb, Network
 from app.models import Setting
+
 
 class PrinterService:
     _instance = None
@@ -11,6 +12,7 @@ class PrinterService:
         if cls._instance is None:
             cls._instance = super(PrinterService, cls).__new__(cls)
             cls._instance.printer = None
+            cls._instance._connection_mode = None
         return cls._instance
 
     def _get_printer_config(self):
@@ -20,36 +22,91 @@ class PrinterService:
             return setting.config['hardware']
         return None
 
-    def connect(self):
+    def _resolve_endpoint(self, config, role='receipt'):
+        """Return normalized connection settings for receipt or kot printer."""
+        nested_key = 'receipt_printer' if role == 'receipt' else 'kot_printer'
+        nested = config.get(nested_key) if isinstance(config.get(nested_key), dict) else {}
+
+        connection_type = (
+            nested.get('connection_type')
+            or config.get('connection_type')
+            or ('usb' if (config.get('printer_vendor_id') or config.get('printer_product_id')) else 'lan')
+        )
+        connection_type = str(connection_type).strip().lower()
+        if connection_type in ('network', 'tcp', 'ethernet'):
+            connection_type = 'lan'
+
+        host = (
+            nested.get('host')
+            or nested.get('ip')
+            or config.get('printer_host')
+            or config.get('printer_ip')
+            or ''
+        )
+        port_raw = nested.get('port') or config.get('printer_port') or 9100
+        try:
+            port = int(port_raw)
+        except (TypeError, ValueError):
+            port = 9100
+
+        vendor_id = (
+            nested.get('printer_vendor_id')
+            or config.get('printer_vendor_id')
+            or ''
+        )
+        product_id = (
+            nested.get('printer_product_id')
+            or config.get('printer_product_id')
+            or ''
+        )
+
+        return {
+            'connection_type': connection_type if connection_type in ('lan', 'usb') else 'lan',
+            'host': str(host).strip(),
+            'port': port,
+            'vendor_id': str(vendor_id).strip(),
+            'product_id': str(product_id).strip(),
+        }
+
+    def connect(self, role='receipt'):
         config = self._get_printer_config()
         if not config:
             print("Printer hardware not configured in settings.")
             return False
 
-        try:
-            # USB Vendor ID and Product ID (hex strings from settings, e.g. "0x04b8")
-            vendor_id = config.get('printer_vendor_id', '').strip()
-            product_id = config.get('printer_product_id', '').strip()
+        endpoint = self._resolve_endpoint(config, role=role)
+        self._connection_mode = endpoint['connection_type']
 
+        try:
+            if endpoint['connection_type'] == 'lan':
+                host = endpoint['host']
+                port = endpoint['port']
+                if not host:
+                    print("Printer LAN host/IP not configured.")
+                    return False
+                print(f"Connecting to LAN Printer ({host}:{port})...")
+                self.printer = Network(host, port=port, timeout=5)
+                return True
+
+            vendor_id = endpoint['vendor_id']
+            product_id = endpoint['product_id']
             if not vendor_id or not product_id:
                 print("Printer USB Vendor ID or Product ID not configured.")
                 return False
 
-            # Convert hex string to int (supports "0x04b8" or "04b8" formats)
             vid = int(vendor_id, 16)
             pid = int(product_id, 16)
-
             print(f"Connecting to USB Printer (VID: {vendor_id}, PID: {product_id})...")
             self.printer = Usb(vid, pid)
             self.printer.open()
             return True
         except Exception as e:
-            print(f"Failed to connect to USB printer: {e}")
+            print(f"Failed to connect to printer: {e}")
             self.printer = None
             return False
 
     def _disconnect(self):
-        """Release USB connection so Windows does not hold the device. Call after each print."""
+        """Release printer connection after each print."""
         if not self.printer:
             return
         try:
@@ -57,14 +114,14 @@ class PrinterService:
         except Exception:
             pass
         try:
-            # Release device so next open() can succeed (fixes "access denied" after first print on Windows)
-            if getattr(self.printer, "device", None) is not None:
+            # Release USB device so next open() can succeed on Windows
+            if self._connection_mode == 'usb' and getattr(self.printer, "device", None) is not None:
                 import usb.util
                 usb.util.dispose_resources(self.printer.device)
         except Exception:
             pass
         self.printer = None
-
+        self._connection_mode = None
     def print_text(self, text):
         if not self.printer:
             if not self.connect():

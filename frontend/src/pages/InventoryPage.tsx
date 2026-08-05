@@ -1,7 +1,8 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  Package, Plus, Minus, Loader2, History, AlertTriangle,
+  Package, Loader2, History, AlertTriangle,
   TrendingDown, DollarSign, Boxes, Pencil,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
@@ -18,15 +19,27 @@ import { showToast } from '../components/Toast';
 import { useScanner } from '../hooks/useScanner';
 
 import { formatSkuLabel, type ProductSku } from '../utils/productSkus';
+import {
+  buildAdjustUnitChoices,
+  formatCurrentStock,
+  quantityToStockDelta,
+  type CatalogUnit,
+} from '../utils/stockUnits';
 import { getBranchId } from '../branch';
 import { useInventoryStore } from '../stores/inventoryStore';
 
 type Product = {
   id: number; name: string; category_name?: string; brand?: string;
   stock_level?: number; skus?: ProductSku[];
+  unit?: string; carton_qty?: number; carton_unit?: string;
+  packet_qty?: number; packet_unit?: string;
 };
 
-type SkuRow = ProductSku & { product_id: number; product_name: string; category_name?: string; brand?: string };
+type SkuRow = ProductSku & {
+  product_id: number; product_name: string; category_name?: string; brand?: string;
+  carton_qty?: number; carton_unit?: string; packet_qty?: number; packet_unit?: string;
+  product_unit?: string;
+};
 
 type Movement = {
   id: number; product_name?: string; variant?: string; delta: number; reason: string;
@@ -41,124 +54,185 @@ type Summary = {
 
 function AdjustStockContent({
   row,
+  siblings,
+  packaging,
   onAdjust,
+  onClose,
 }: {
   row: SkuRow;
-  onAdjust: (delta: number, reason?: string) => Promise<void>;
+  siblings: SkuRow[];
+  packaging?: {
+    carton_qty?: number; carton_unit?: string;
+    packet_qty?: number; packet_unit?: string;
+    unit?: string;
+  } | null;
+  onAdjust: (delta: number, reason?: string, notes?: string) => Promise<void>;
+  onClose: () => void;
 }) {
   const savedStock = row.stock_level ?? 0;
-  const [draftStock, setDraftStock] = useState(savedStock);
-  const [inputVal, setInputVal] = useState(String(savedStock));
+  const [mode, setMode] = useState<'add' | 'remove'>('add');
+  const [quantity, setQuantity] = useState('');
+  const [unitKey, setUnitKey] = useState('');
+  const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const [catalogUnits, setCatalogUnits] = useState<CatalogUnit[]>([]);
 
   useEffect(() => {
-    setDraftStock(savedStock);
-    setInputVal(String(savedStock));
-  }, [row.id, savedStock]);
+    get<{ units?: CatalogUnit[] }>('/v1/units/')
+      .then(d => setCatalogUnits(d?.units ?? []))
+      .catch(() => setCatalogUnits([]));
+  }, []);
 
-  const delta = draftStock - savedStock;
+  const unitChoices = useMemo(
+    () => buildAdjustUnitChoices(row, siblings, catalogUnits, packaging),
+    [row, siblings, catalogUnits, packaging],
+  );
 
-  const applyDelta = async (change: number, reason = 'adjustment') => {
-    if (change === 0 || busy) return;
-    const next = Math.max(0, savedStock + change);
-    const actualChange = next - savedStock;
-    if (actualChange === 0) return;
+  useEffect(() => {
+    if (!unitChoices.length) return;
+    setUnitKey(prev => (unitChoices.some(c => c.key === prev) ? prev : unitChoices[0].key));
+  }, [unitChoices]);
 
-    setDraftStock(next);
-    setInputVal(String(next));
+  const selectedUnit = unitChoices.find(c => c.key === unitKey) ?? unitChoices[0];
+  const currentLabel = formatCurrentStock(savedStock, row.quantity_value, row.unit_abbr);
+
+  const submit = async () => {
+    if (busy || !selectedUnit) return;
+    const qty = parseFloat(quantity);
+    const { delta, error } = quantityToStockDelta(qty, selectedUnit);
+    if (error || delta <= 0) {
+      showToast(error || 'Enter a valid quantity', 'error');
+      return;
+    }
+    const signed = mode === 'add' ? delta : -delta;
+    if (mode === 'remove' && delta > savedStock) {
+      showToast(`Only ${savedStock} in stock`, 'error');
+      return;
+    }
     setBusy(true);
     try {
-      await onAdjust(actualChange, reason);
+      await onAdjust(
+        signed,
+        mode === 'add' ? 'stock_in' : 'stock_out',
+        note.trim() || undefined,
+      );
+      onClose();
     } catch {
-      setDraftStock(savedStock);
-      setInputVal(String(savedStock));
+      /* toast handled by parent */
     } finally {
       setBusy(false);
     }
   };
 
-  const syncInput = (raw: string) => {
-    setInputVal(raw);
-    const n = parseInt(raw, 10);
-    if (Number.isFinite(n) && n >= 0) setDraftStock(n);
-  };
-
-  const commitInput = async () => {
-    const n = parseInt(inputVal, 10);
-    if (!Number.isFinite(n) || n < 0) {
-      setInputVal(String(savedStock));
-      setDraftStock(savedStock);
-      return;
-    }
-    setDraftStock(n);
-    const change = n - savedStock;
-    if (change !== 0) await applyDelta(change);
-    else setInputVal(String(savedStock));
+  const modeBtn = (value: 'add' | 'remove', label: string) => {
+    const active = mode === value;
+    return (
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => setMode(value)}
+        className={`flex-1 py-3 rounded-xl text-sm font-semibold border transition-colors ${
+          active
+            ? 'border-accent-500 bg-accent-600/15 text-foreground'
+            : 'border-border bg-canvas-subtle text-muted hover:text-foreground hover:border-border'
+        }`}
+      >
+        {label}
+      </button>
+    );
   };
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-xl bg-canvas-subtle p-4 space-y-1">
-        <p className="font-semibold text-sm">{row.product_name}</p>
-        <p className="text-sm text-foreground">{row.variant_name || '—'}</p>
-        <p className="text-sm text-accent-600">{formatSkuLabel(row)}</p>
-        <p className="text-xs text-muted font-mono">Barcode: {row.barcode}</p>
-        <div className="flex gap-4 pt-2 text-sm">
-          <span>Purchase: <strong>{formatCurrency(row.cost_price)}</strong></span>
-          <span>Sale: <strong className="text-accent-600">{formatCurrency(row.selling_price)}</strong></span>
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-border bg-surface p-4 space-y-3">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted">On hand</span>
-          <span className="font-semibold tabular-nums">{savedStock}</span>
-        </div>
-        {delta !== 0 && (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted">{delta > 0 ? 'Adding' : 'Removing'}</span>
-            <span className={`font-semibold tabular-nums ${delta > 0 ? 'text-success' : 'text-danger'}`}>
-              {delta > 0 ? '+' : ''}{delta}
-            </span>
-          </div>
+    <div className="space-y-5">
+      <div>
+        <p className="font-semibold text-base tracking-wide uppercase text-foreground">
+          {row.product_name}
+        </p>
+        <p className="text-sm text-muted mt-1">
+          Current:{' '}
+          <span className="text-foreground font-medium">{currentLabel}</span>
+          {' '}at this branch. Movements appear in stock reports.
+        </p>
+        {(row.variant_name || formatSkuLabel(row)) && (
+          <p className="text-xs text-muted mt-1">
+            {row.variant_name && row.variant_name !== 'Standard' ? `${row.variant_name} · ` : ''}
+            {formatSkuLabel(row)}
+            {row.barcode ? ` · ${row.barcode}` : ''}
+          </p>
         )}
-        <div className="flex items-center justify-between text-sm pt-1 border-t border-border">
-          <span className="font-medium">{delta !== 0 ? 'New total' : 'Quantity'}</span>
-          <span className="font-bold text-lg tabular-nums text-accent-600">{draftStock}</span>
+      </div>
+
+      <div className="flex gap-3">
+        {modeBtn('add', 'Add')}
+        {modeBtn('remove', 'Remove')}
+      </div>
+
+      <div className="grid grid-cols-[1.4fr_1fr] gap-3">
+        <div className="space-y-1.5">
+          <label htmlFor="adjust-qty" className="block text-sm font-medium text-muted">Quantity</label>
+          <input
+            id="adjust-qty"
+            type="number"
+            min={0}
+            step="any"
+            inputMode="decimal"
+            value={quantity}
+            disabled={busy}
+            onChange={e => setQuantity(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && submit()}
+            placeholder="e.g. 2.5"
+            className="input-base"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label htmlFor="adjust-unit" className="block text-sm font-medium text-muted">Unit</label>
+          <select
+            id="adjust-unit"
+            value={selectedUnit?.key ?? ''}
+            disabled={busy || !unitChoices.length}
+            onChange={e => setUnitKey(e.target.value)}
+            className="input-base appearance-none bg-[length:1rem] bg-[right_0.75rem_center] bg-no-repeat pr-10"
+            style={{
+              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+            }}
+          >
+            {unitChoices.map(c => (
+              <option key={c.key} value={c.key}>{c.label}</option>
+            ))}
+          </select>
         </div>
       </div>
 
-      <div className="flex items-center justify-center gap-4">
-        <Button variant="secondary" disabled={busy || savedStock <= 0} onClick={() => applyDelta(-1)}>
-          <Minus className="w-4 h-4" />
-        </Button>
+      <div className="space-y-1.5">
+        <label htmlFor="adjust-note" className="block text-sm font-medium text-muted">Note (optional)</label>
         <input
-          type="number"
-          min={0}
-          value={inputVal}
+          id="adjust-note"
+          type="text"
+          value={note}
           disabled={busy}
-          onChange={e => syncInput(e.target.value)}
-          onBlur={commitInput}
-          onKeyDown={e => e.key === 'Enter' && commitInput()}
-          className="w-20 text-center input-base py-2 text-base font-semibold tabular-nums"
+          onChange={e => setNote(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && submit()}
+          placeholder="e.g. Stock take correction, spoilage"
+          className="input-base"
         />
-        <Button variant="secondary" disabled={busy} onClick={() => applyDelta(1)}>
-          <Plus className="w-4 h-4" />
-        </Button>
       </div>
 
-      <div className="grid grid-cols-4 gap-2">
-        {[5, 10, 25, 50].map(n => (
-          <button
-            key={n}
-            type="button"
-            disabled={busy}
-            onClick={() => applyDelta(n, 'stock_in')}
-            className="py-2 rounded-lg border border-border text-sm font-medium hover:bg-canvas-subtle disabled:opacity-50"
-          >
-            +{n}
-          </button>
-        ))}
+      <p className="text-xs text-muted">
+        Purchases with updated cost should use{' '}
+        <Link to="/grn" className="text-foreground font-medium hover:text-accent-600 underline-offset-2 hover:underline">
+          Restock
+        </Link>
+        {' '}instead.
+      </p>
+
+      <div className="flex justify-end gap-3 pt-1">
+        <Button type="button" variant="secondary" disabled={busy} onClick={onClose}>
+          Cancel
+        </Button>
+        <Button type="button" disabled={busy || !quantity} onClick={submit}>
+          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+          Update stock
+        </Button>
       </div>
     </div>
   );
@@ -211,6 +285,11 @@ export default function InventoryPage() {
       product_name: p.name,
       category_name: p.category_name,
       brand: p.brand,
+      carton_qty: p.carton_qty,
+      carton_unit: p.carton_unit,
+      packet_qty: p.packet_qty,
+      packet_unit: p.packet_unit,
+      product_unit: p.unit,
     })),
   );
 
@@ -222,8 +301,21 @@ export default function InventoryPage() {
     if (row.id != null) setStockModal(row.id, row.product_id);
   };
 
-  const adjustStock = async (skuId: number, productId: number, delta: number, reason = 'adjustment') => {
-    await post('/inventory/adjust', { sku_id: skuId, product_id: productId, quantity_delta: delta, branch_id: branchId, reason });
+  const adjustStock = async (
+    skuId: number,
+    productId: number,
+    delta: number,
+    reason = 'adjustment',
+    notes?: string,
+  ) => {
+    await post('/inventory/adjust', {
+      sku_id: skuId,
+      product_id: productId,
+      quantity_delta: delta,
+      branch_id: branchId,
+      reason,
+      notes: notes || undefined,
+    });
     showToast('Stock updated', 'success');
     fetchData();
   };
@@ -380,14 +472,23 @@ export default function InventoryPage() {
         </div>
       )}
 
-      <Modal open={stockModalSkuId != null} onClose={() => setStockModal(null)} title="Adjust Stock" size="md">
+      <Modal open={stockModalSkuId != null} onClose={() => setStockModal(null)} title="Adjust stock" size="md">
         {stockModal?.id != null && (
           <AdjustStockContent
             key={stockModal.id}
             row={stockModal}
-            onAdjust={async (delta, reason) => {
+            siblings={skuRows.filter(s => s.product_id === stockModal.product_id)}
+            packaging={{
+              carton_qty: stockModal.carton_qty,
+              carton_unit: stockModal.carton_unit,
+              packet_qty: stockModal.packet_qty,
+              packet_unit: stockModal.packet_unit,
+              unit: stockModal.product_unit || stockModal.unit_abbr,
+            }}
+            onClose={() => setStockModal(null)}
+            onAdjust={async (delta, reason, notes) => {
               try {
-                await adjustStock(stockModal.id!, stockModal.product_id, delta, reason);
+                await adjustStock(stockModal.id!, stockModal.product_id, delta, reason, notes);
               } catch (e) {
                 showToast(getUserMessage(e), 'error');
                 throw e;

@@ -104,8 +104,24 @@ export default function SupplyChain() {
   const [customTo, setCustomTo] = useState('');
   const [ledgerLoading, setLedgerLoading] = useState(false);
 
+  const todayStr = () => {
+    const d = new Date();
+    return [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, '0'),
+      String(d.getDate()).padStart(2, '0'),
+    ].join('-');
+  };
+  const emptyTxnForm = {
+    type: 'purchase' as 'purchase' | 'payment',
+    date: todayStr(),
+    amount: '',
+    payment_method: 'cash',
+    reference_number: '',
+    notes: '',
+  };
   const [payOpen, setPayOpen] = useState(false);
-  const [payForm, setPayForm] = useState({ amount: '', payment_method: 'cash', reference_number: '', notes: '' });
+  const [payForm, setPayForm] = useState(emptyTxnForm);
   const [paying, setPaying] = useState(false);
 
   const load = async () => {
@@ -231,21 +247,35 @@ export default function SupplyChain() {
     }
   };
 
-  const submitPayment = async () => {
+  const openTxnModal = () => {
+    setPayForm({ ...emptyTxnForm, date: todayStr() });
+    setPayOpen(true);
+  };
+
+  const submitTransaction = async () => {
     if (!ledgerSupplier) return;
     const amount = parseFloat(payForm.amount);
     if (!amount || amount <= 0) { showToast('Enter a valid amount', 'error'); return; }
     setPaying(true);
     try {
-      await post(`/v1/suppliers/${ledgerSupplier.id}/payments`, {
+      const body = {
         amount,
-        payment_method: payForm.payment_method,
-        reference_number: payForm.reference_number || undefined,
-        notes: payForm.notes || undefined,
-      });
-      showToast('Payment recorded', 'success');
+        date: payForm.date || undefined,
+        reference_number: payForm.reference_number.trim() || undefined,
+        notes: payForm.notes.trim() || undefined,
+      };
+      if (payForm.type === 'payment') {
+        await post(`/v1/suppliers/${ledgerSupplier.id}/payments`, {
+          ...body,
+          payment_method: payForm.payment_method,
+        });
+        showToast('Payment recorded', 'success');
+      } else {
+        await post(`/v1/suppliers/${ledgerSupplier.id}/purchases`, body);
+        showToast('Purchase recorded', 'success');
+      }
       setPayOpen(false);
-      setPayForm({ amount: '', payment_method: 'cash', reference_number: '', notes: '' });
+      setPayForm({ ...emptyTxnForm, date: todayStr() });
       await loadLedger(ledgerSupplier.id);
       load();
     } catch (e) {
@@ -461,7 +491,7 @@ export default function SupplyChain() {
                 <div className="flex gap-2">
                   <Button size="sm" variant="secondary" onClick={printLedger}><Printer className="w-3.5 h-3.5" /> Print Ledger</Button>
                   <Button size="sm" variant="secondary" onClick={printLedger}><FileDown className="w-3.5 h-3.5" /> Export PDF</Button>
-                  <Button size="sm" onClick={() => setPayOpen(true)}><Plus className="w-3.5 h-3.5" /> Add Transaction</Button>
+                  <Button size="sm" onClick={openTxnModal}><Plus className="w-3.5 h-3.5" /> Add Transaction</Button>
                 </div>
               </div>
 
@@ -515,35 +545,104 @@ export default function SupplyChain() {
         </div>
       )}
 
-      {/* Payment modal */}
+      {/* Add transaction modal */}
       <Modal
         open={payOpen}
         onClose={() => setPayOpen(false)}
-        title="Record Supplier Payment"
+        title="Add transaction"
         footer={
-          <>
+          <div className="flex w-full justify-between gap-3">
             <Button variant="secondary" onClick={() => setPayOpen(false)}>Cancel</Button>
-            <Button onClick={submitPayment} disabled={paying}>{paying ? 'Saving…' : 'Record Payment'}</Button>
-          </>
+            <Button onClick={submitTransaction} disabled={paying}>{paying ? 'Saving…' : 'Save'}</Button>
+          </div>
         }
       >
-        <div className="space-y-3">
-          <Input label="Amount *" type="number" min="0" step="0.01" value={payForm.amount} onChange={e => setPayForm(f => ({ ...f, amount: e.target.value }))} />
+        <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-foreground-secondary mb-1.5">Payment Method</label>
-            <select
-              value={payForm.payment_method}
-              onChange={e => setPayForm(f => ({ ...f, payment_method: e.target.value }))}
-              className="w-full rounded-xl border border-border bg-canvas px-3 py-2.5 text-sm"
-            >
-              <option value="cash">Cash</option>
-              <option value="bank_transfer">Bank Transfer</option>
-              <option value="cheque">Cheque</option>
-              <option value="online">Online Transfer</option>
-            </select>
+            <label className="block text-sm font-medium text-foreground-secondary mb-1.5">Transaction Type</label>
+            <div className="grid grid-cols-2 gap-2 p-1 rounded-xl border border-border bg-canvas-subtle">
+              {([
+                { key: 'purchase' as const, label: 'Purchase (Invoice)' },
+                { key: 'payment' as const, label: 'Payment Made' },
+              ]).map(opt => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setPayForm(f => ({ ...f, type: opt.key }))}
+                  className={`px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    payForm.type === opt.key
+                      ? 'bg-surface text-accent-600 border border-accent-600 shadow-sm'
+                      : 'text-muted hover:text-foreground border border-transparent'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
-          <Input label="Reference Number" value={payForm.reference_number} onChange={e => setPayForm(f => ({ ...f, reference_number: e.target.value }))} placeholder="Cheque / transfer ref" />
-          <Input label="Notes" value={payForm.notes} onChange={e => setPayForm(f => ({ ...f, notes: e.target.value }))} />
+
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Date"
+              type="date"
+              value={payForm.date}
+              onChange={e => setPayForm(f => ({ ...f, date: e.target.value }))}
+            />
+            <Input
+              label="Reference / Invoice Number"
+              value={payForm.reference_number}
+              onChange={e => setPayForm(f => ({ ...f, reference_number: e.target.value }))}
+              placeholder="INV-001"
+            />
+          </div>
+
+          {payForm.type === 'payment' ? (
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Amount in PKR"
+                type="number"
+                min="0"
+                step="0.01"
+                value={payForm.amount}
+                onChange={e => setPayForm(f => ({ ...f, amount: e.target.value }))}
+                placeholder="15000"
+              />
+              <div>
+                <label className="block text-sm font-medium text-foreground-secondary mb-1.5">Payment Method</label>
+                <select
+                  value={payForm.payment_method}
+                  onChange={e => setPayForm(f => ({ ...f, payment_method: e.target.value }))}
+                  className="input-base w-full"
+                >
+                  <option value="cash">Cash</option>
+                  <option value="bank_transfer">Bank Transfer</option>
+                  <option value="cheque">Cheque</option>
+                  <option value="online">Online Transfer</option>
+                </select>
+              </div>
+            </div>
+          ) : (
+            <Input
+              label="Amount in PKR"
+              type="number"
+              min="0"
+              step="0.01"
+              value={payForm.amount}
+              onChange={e => setPayForm(f => ({ ...f, amount: e.target.value }))}
+              placeholder="15000"
+            />
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-foreground-secondary mb-1.5">Description / Notes</label>
+            <textarea
+              value={payForm.notes}
+              onChange={e => setPayForm(f => ({ ...f, notes: e.target.value }))}
+              rows={3}
+              placeholder="Chicken supply, monthly settlement, or cheque details"
+              className="input-base w-full resize-none"
+            />
+          </div>
         </div>
       </Modal>
     </div>

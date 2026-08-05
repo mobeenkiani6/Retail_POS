@@ -168,7 +168,18 @@ export default function SuppliersSettings() {
         </div>
       )}
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Edit Supplier' : 'Add supplier'} size="md">
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={editing ? 'Edit supplier' : 'Add supplier'}
+        size="md"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
+            <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
+          </>
+        }
+      >
         <div className="space-y-3">
           <Input label="Company Name *" value={form.name} onChange={setF('name')} placeholder="e.g. Sysco Foods" />
           <Input label="Supplier Code" hint="Auto-generated for new suppliers. You can still edit it." value={form.supplier_code} onChange={setF('supplier_code')} placeholder="Auto-generated from supplier name" />
@@ -185,10 +196,6 @@ export default function SuppliersSettings() {
             <textarea value={form.address} onChange={setF('address')} rows={2} placeholder="123 Industrial Pkwy" className="input-base w-full resize-none" />
           </div>
           <Input label="City" value={form.city} onChange={setF('city')} />
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
-            <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
-          </div>
         </div>
       </Modal>
     </div>

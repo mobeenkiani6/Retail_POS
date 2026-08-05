@@ -50,6 +50,15 @@ export type ProductParent = {
   brand_id?: number;
   brand?: string;
   supplier_id?: number;
+  sku?: string;
+  unit?: string;
+  unit_id?: number | null;
+  carton_qty?: number;
+  carton_unit?: string;
+  packet_qty?: number;
+  packet_unit?: string;
+  min_stock?: number;
+  reorder_qty?: number;
   image_url?: string;
   tax_rate?: number;
   notes?: string;
@@ -67,10 +76,10 @@ export function emptySkuForm(): ProductSkuForm {
   return {
     sku_code: '',
     barcode: '',
-    variant_name: 'Standard',
+    variant_name: 'Default',
     quantity_value: '1',
     unit_id: '',
-    unit_abbr: 'ea',
+    unit_abbr: 'pc',
     cost_price: '0',
     selling_price: '0',
     min_stock: '0',
@@ -109,7 +118,12 @@ export function formatSkuLabel(s: Pick<ProductSku, 'quantity_value' | 'unit_abbr
   const qtyStr = Number.isInteger(qty) ? String(qty) : String(qty);
   const unit = (s.unit_abbr || '').trim();
   if (unit && !['ea', 'each', 'pc', 'piece'].includes(unit.toLowerCase())) {
-    return `${qtyStr} ${unit}`;
+    const PACK: Record<string, string> = {
+      pkt: 'Packet', packet: 'Packet', pk: 'Pack', pack: 'Pack',
+      ctn: 'Carton', carton: 'Carton', bx: 'Box', box: 'Box',
+    };
+    const label = PACK[unit.toLowerCase()] || unit;
+    return `${qtyStr} ${label}`;
   }
   return s.variant_name || qtyStr;
 }

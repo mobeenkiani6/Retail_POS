@@ -2,6 +2,29 @@
 from app.models import db, Notification, Inventory, Product, SyncOutbox
 
 
+def notify_sale_below_cost(branch_id, product_name, variant_name, cost_price, sell_price):
+    """Create a warning when purchase cost rises above the sale price."""
+    label = f'{product_name}' + (f' ({variant_name})' if variant_name else '')
+    title = f'Sale price below cost: {label}'
+    message = (
+        f'{label} purchase cost is now {float(cost_price):.2f} but sale price is '
+        f'{float(sell_price):.2f}. Update the sale price to protect margin.'
+    )
+    existing = Notification.query.filter_by(title=title, read=False).first()
+    if existing:
+        existing.message = message
+        existing.severity = 'warning'
+        return existing
+    note = Notification(
+        branch_id=branch_id,
+        title=title,
+        message=message,
+        severity='warning',
+    )
+    db.session.add(note)
+    return note
+
+
 def generate_system_notifications(branch_id=None):
     query = (
         db.session.query(Inventory, Product)

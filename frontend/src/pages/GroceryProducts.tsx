@@ -85,14 +85,27 @@ export default function GroceryProducts() {
       showToast('Product name is required', 'error');
       return;
     }
-    if (!editingId && form.skus.length === 0) {
-      showToast('Add at least one SKU (pack size)', 'error');
+    if (!form.unit_id && !form.unit) {
+      showToast('Select a unit', 'error');
+      return;
+    }
+    if (form.skus.length === 0) {
+      showToast('Add at least one variant', 'error');
       return;
     }
     for (const sku of form.skus) {
-      if (!sku.barcode.trim()) {
-        showToast('Each SKU needs a barcode', 'error');
+      if (!sku.variant_name.trim()) {
+        showToast('Each variant needs a name', 'error');
         return;
+      }
+      if (!sku.barcode.trim()) {
+        showToast('Each variant needs a barcode', 'error');
+        return;
+      }
+      const cost = parseFloat(sku.cost_price) || 0;
+      const sell = parseFloat(sku.selling_price) || 0;
+      if (sell > 0 && cost > sell) {
+        showToast(`Warning: ${sku.variant_name} sale price is below purchase price`, 'info');
       }
     }
     setSaving(true);
@@ -319,12 +332,14 @@ export default function GroceryProducts() {
       <Modal
         open={modalOpen}
         onClose={closeModal}
-        title={editingId ? 'Edit Product' : 'New Product'}
+        title={editingId ? 'Edit product' : 'Add product'}
         size="2xl"
         footer={
           <>
             <Button variant="secondary" onClick={closeModal}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save Product'}</Button>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving…' : editingId ? 'Save changes' : 'Add product'}
+            </Button>
           </>
         }
       >

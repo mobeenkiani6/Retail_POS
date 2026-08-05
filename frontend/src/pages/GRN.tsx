@@ -21,6 +21,7 @@ type GRNItem = {
   product_name?: string;
   sku_label?: string;
   quantity: number;
+  receive_unit?: 'unit' | 'carton' | 'packet';
   cost_price: number;
   sell_price: number;
 };
@@ -41,6 +42,9 @@ type Product = {
   name: string;
   base_price?: number;
   cost_price?: number;
+  carton_qty?: number;
+  packet_qty?: number;
+  unit?: string;
   skus?: ProductSku[];
 };
 
@@ -52,6 +56,7 @@ function skusFromProduct(p: Product): GrnSkuLine[] {
     label: s.display_label || formatSkuLabel(s),
     selected: false,
     quantity: 1,
+    receive_unit: 'unit' as const,
     cost_price: s.cost_price ?? 0,
     sell_price: s.selling_price ?? 0,
   }));
@@ -72,7 +77,14 @@ function blocksFromItems(items: GRNItem[], products: Product[]): GrnProductBlock
       ? allSkus.map(s => {
           const match = productItems.find(i => i.sku_id === s.sku_id);
           return match
-            ? { ...s, selected: true, quantity: match.quantity, cost_price: match.cost_price, sell_price: match.sell_price }
+            ? {
+              ...s,
+              selected: true,
+              quantity: match.quantity,
+              receive_unit: match.receive_unit || 'unit',
+              cost_price: match.cost_price,
+              sell_price: match.sell_price,
+            }
             : s;
         })
       : productItems.map(i => ({
@@ -80,6 +92,7 @@ function blocksFromItems(items: GRNItem[], products: Product[]): GrnProductBlock
           label: i.sku_label || 'Standard',
           selected: true,
           quantity: i.quantity,
+          receive_unit: (i.receive_unit || 'unit') as 'unit' | 'carton' | 'packet',
           cost_price: i.cost_price,
           sell_price: i.sell_price,
         }));
@@ -96,6 +109,7 @@ function itemsFromBlocks(blocks: GrnProductBlock[]): GRNItem[] {
         product_id: block.product_id,
         sku_id: sku.sku_id || undefined,
         quantity: sku.quantity,
+        receive_unit: sku.receive_unit || 'unit',
         cost_price: sku.cost_price,
         sell_price: sku.sell_price,
       });
@@ -241,11 +255,22 @@ export default function GRNPage() {
   };
 
   const receiveGrn = async (id: number) => {
-    const ok = await showConfirm({ title: 'Receive Stock', message: 'This will add quantities to inventory. Continue?' });
+    const ok = await showConfirm({ title: 'Receive Stock', message: 'This will add quantities to inventory and update purchase costs. Continue?' });
     if (!ok) return;
     try {
-      await post(`/v1/grn/${id}/receive`, {});
+      const res = await post<{
+        message?: string;
+        price_warnings?: { name: string; variant?: string; cost_price: number; sell_price: number }[];
+      }>(`/v1/grn/${id}/receive`, {});
       showToast('Stock received successfully', 'success');
+      const warnings = res?.price_warnings || [];
+      for (const w of warnings) {
+        const label = w.variant ? `${w.name} (${w.variant})` : w.name;
+        showToast(
+          `${label}: purchase ${formatCurrency(w.cost_price)} is above sale ${formatCurrency(w.sell_price)} — update sale price`,
+          'error',
+        );
+      }
       if (editing?.id === id) clearDraft();
       load();
     } catch (e) {
@@ -541,7 +566,7 @@ export default function GRNPage() {
                               </label>
 
                               {sku.selected && (
-                                <div className="grid grid-cols-3 gap-2 flex-1 sm:max-w-md">
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 flex-1 sm:max-w-xl">
                                   <div>
                                     <label className="text-[10px] uppercase text-muted font-semibold mb-1 block">Qty</label>
                                     <input
@@ -553,7 +578,26 @@ export default function GRNPage() {
                                     />
                                   </div>
                                   <div>
-                                    <label className="text-[10px] uppercase text-muted font-semibold mb-1 block">Cost</label>
+                                    <label className="text-[10px] uppercase text-muted font-semibold mb-1 block">As</label>
+                                    <select
+                                      value={sku.receive_unit || 'unit'}
+                                      onChange={e => updateSkuField(block.product_id, sku.sku_id, 'receive_unit', e.target.value)}
+                                      className="input-base w-full py-1.5 text-sm"
+                                      title={
+                                        product && (product.carton_qty || 0) > 0
+                                          ? `Carton = ${product.carton_qty} ${product.unit || 'units'}`
+                                          : 'Set packaging on the product to receive by carton/packet'
+                                      }
+                                    >
+                                      <option value="unit">Packs</option>
+                                      <option value="carton" disabled={!((product?.carton_qty || 0) > 0)}>Cartons</option>
+                                      <option value="packet" disabled={!((product?.packet_qty || 0) > 0)}>Packets</option>
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="text-[10px] uppercase text-muted font-semibold mb-1 block">
+                                      Cost / {sku.receive_unit === 'carton' ? 'carton' : sku.receive_unit === 'packet' ? 'packet' : 'pack'}
+                                    </label>
                                     <input
                                       type="number"
                                       min={0}
@@ -564,7 +608,7 @@ export default function GRNPage() {
                                     />
                                   </div>
                                   <div>
-                                    <label className="text-[10px] uppercase text-muted font-semibold mb-1 block">Sell</label>
+                                    <label className="text-[10px] uppercase text-muted font-semibold mb-1 block">Sell / pack</label>
                                     <input
                                       type="number"
                                       min={0}

@@ -6,6 +6,8 @@ export type GrnSkuLine = {
   label: string;
   selected: boolean;
   quantity: number;
+  /** unit | carton | packet */
+  receive_unit: 'unit' | 'carton' | 'packet';
   cost_price: number;
   sell_price: number;
 };

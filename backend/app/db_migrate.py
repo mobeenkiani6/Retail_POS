@@ -126,6 +126,11 @@ MIGRATIONS = [
     "ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS sku_id INTEGER REFERENCES product_skus(id)",
     "ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS sku_id INTEGER REFERENCES product_skus(id)",
     "ALTER TABLE grn_items ADD COLUMN IF NOT EXISTS sku_id INTEGER REFERENCES product_skus(id)",
+    "ALTER TABLE grn_items ADD COLUMN IF NOT EXISTS receive_unit VARCHAR(20) DEFAULT 'unit'",
+    "ALTER TABLE products ADD COLUMN IF NOT EXISTS carton_qty NUMERIC(12,3) DEFAULT 0",
+    "ALTER TABLE products ADD COLUMN IF NOT EXISTS carton_unit VARCHAR(20)",
+    "ALTER TABLE products ADD COLUMN IF NOT EXISTS packet_qty NUMERIC(12,3) DEFAULT 0",
+    "ALTER TABLE products ADD COLUMN IF NOT EXISTS packet_unit VARCHAR(20)",
     "ALTER TABLE inventory DROP CONSTRAINT IF EXISTS _branch_sku_uc",
     "ALTER TABLE inventory ADD CONSTRAINT _branch_sku_uc UNIQUE (branch_id, sku_id)",
     # --- Previous Orders / receipt permanence ---
@@ -398,19 +403,28 @@ def run_migrations(db):
                 ('Liter', 'L', False),
                 ('Bottle', 'btl', False),
                 ('Can', 'can', False),
-                ('Packet', 'pkt', False),
-                ('Pack', 'pk', False),
-                ('Jar', 'jar', False),
-                ('Roll', 'roll', False),
-                ('Dozen', 'dz', False),
-                ('Box', 'bx', False),
-                ('Crate', 'crt', False),
-                ('Bundle', 'bdl', False),
+                ('Packet', 'Packet', False),
+                ('Pack', 'Pack', False),
+                ('Jar', 'Jar', False),
+                ('Roll', 'Roll', False),
+                ('Dozen', 'Dozen', False),
+                ('Box', 'Box', False),
+                ('Carton', 'Carton', False),
+                ('Crate', 'Crate', False),
+                ('Bundle', 'Bundle', False),
             ]
             for name, abbr, is_default in defaults:
                 db.session.add(Unit(name=name, abbreviation=abbr, is_default=is_default, active=True))
             db.session.commit()
             print('Seeded default units.')
+        # Ensure packaging units use full names (not pkt/ctn) and Carton exists
+        for full_name in ('Packet', 'Pack', 'Carton', 'Box', 'Crate', 'Bundle', 'Dozen'):
+            row = Unit.query.filter(Unit.name.ilike(full_name)).first()
+            if row and row.abbreviation != full_name:
+                row.abbreviation = full_name
+            elif not row and full_name == 'Carton':
+                db.session.add(Unit(name='Carton', abbreviation='Carton', is_default=False, active=True))
+        db.session.commit()
     except Exception as e:
         db.session.rollback()
         print(f'Unit seed note: {e}')

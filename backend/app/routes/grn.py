@@ -62,7 +62,12 @@ def receive_grn_route(current_user, grn_id):
         return error_response('Forbidden', 'Unauthorized', 403)
     try:
         grn = receive_grn(grn_id, current_user.id)
-        return jsonify({'grn': grn_to_dict(grn), 'message': 'GRN received successfully'}), 200
+        payload = grn_to_dict(grn)
+        return jsonify({
+            'grn': payload,
+            'message': 'GRN received successfully',
+            'price_warnings': payload.get('price_warnings') or [],
+        }), 200
     except ValueError as e:
         return error_response('Bad Request', str(e), 400)
 
@@ -90,12 +95,20 @@ def update_grn_route(current_user, grn_id):
                 sku = ProductSku.query.get(int(sku_id))
                 if sku:
                     product_id = sku.product_id
+            ru = (item.get('receive_unit') or 'unit').strip().lower()
+            if ru in ('carton', 'cartons', 'box', 'boxes'):
+                ru = 'carton'
+            elif ru in ('packet', 'packets', 'pack', 'packs', 'pkt'):
+                ru = 'packet'
+            else:
+                ru = 'unit'
             grn_item = GRNItem(
                 grn_id=grn.id,
                 product_id=product_id,
                 sku_id=int(sku_id) if sku_id else None,
                 batch_number=item.get('batch_number') or 'N/A',
                 quantity=int(item['quantity']),
+                receive_unit=ru,
                 cost_price=item['cost_price'],
                 sell_price=item.get('sell_price', 0),
                 expiry_date=item.get('expiry_date'),
@@ -126,6 +139,7 @@ def duplicate_grn_route(current_user, grn_id):
         'product_id': i.product_id,
         'sku_id': i.sku_id,
         'quantity': i.quantity,
+        'receive_unit': getattr(i, 'receive_unit', None) or 'unit',
         'cost_price': float(i.cost_price),
         'sell_price': float(i.sell_price),
     } for i in grn.items]

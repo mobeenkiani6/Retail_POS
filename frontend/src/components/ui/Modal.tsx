@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
 
@@ -27,13 +28,20 @@ export default function Modal({ open, onClose, title, description, children, siz
     if (!open) return;
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', handler);
+      document.body.style.overflow = prev;
+    };
   }, [open, onClose]);
 
-  return (
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
     <AnimatePresence>
       {open && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-hidden">
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -46,17 +54,18 @@ export default function Modal({ open, onClose, title, description, children, siz
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ duration: 0.2 }}
-            className={`relative w-full ${sizeClass(size)} bg-surface rounded-2xl shadow-premium border border-border overflow-hidden`}
+            className={`relative w-full ${sizeClass(size)} max-h-[min(90vh,880px)] flex flex-col bg-surface rounded-2xl shadow-premium border border-border overflow-hidden`}
             onClick={e => e.stopPropagation()}
           >
             {(title || description) && (
-              <div className="px-6 pt-6 pb-4 border-b border-border-subtle">
+              <div className="px-6 pt-6 pb-4 border-b border-border-subtle shrink-0">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     {title && <h2 className="text-lg font-semibold text-foreground">{title}</h2>}
                     {description && <p className="text-sm text-muted mt-1">{description}</p>}
                   </div>
                   <button
+                    type="button"
                     onClick={onClose}
                     className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-muted transition-colors"
                   >
@@ -65,15 +74,18 @@ export default function Modal({ open, onClose, title, description, children, siz
                 </div>
               </div>
             )}
-            <div className="px-6 py-5 max-h-[70vh] overflow-y-auto scrollbar-thin">{children}</div>
+            <div className="px-6 py-5 overflow-y-auto overscroll-contain scroll-smooth scrollbar-thin min-h-0 flex-1">
+              {children}
+            </div>
             {footer && (
-              <div className="px-6 py-4 border-t border-border-subtle bg-canvas-subtle flex justify-end gap-3">
+              <div className="px-6 py-4 border-t border-border-subtle bg-canvas-subtle flex justify-end gap-3 shrink-0">
                 {footer}
               </div>
             )}
           </motion.div>
         </div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   );
 }

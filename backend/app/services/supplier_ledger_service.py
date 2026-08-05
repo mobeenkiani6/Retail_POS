@@ -35,6 +35,7 @@ def post_ledger_entry(
     payment_method=None,
     notes=None,
     user_id=None,
+    created_at=None,
     commit=False,
 ):
     """
@@ -60,6 +61,7 @@ def post_ledger_entry(
         payment_method=payment_method,
         notes=notes,
         created_by=user_id,
+        created_at=created_at or datetime.utcnow(),
     )
     db.session.add(entry)
     supplier.outstanding_balance = balance_after
@@ -84,22 +86,35 @@ def post_ledger_entry(
     return entry
 
 
-def post_purchase(supplier_id, amount, *, grn_id=None, grn_number=None, user_id=None, notes=None):
+def post_purchase(
+    supplier_id, amount, *,
+    grn_id=None, grn_number=None, reference_number=None,
+    notes=None, user_id=None, created_at=None, commit=False,
+):
     if not supplier_id or amount is None:
         return None
     amount = float(amount)
     if amount <= 0:
+        if commit:
+            raise ValueError('Purchase amount must be positive')
         return None
+    ref = reference_number or grn_number
     return post_ledger_entry(
         supplier_id, 'purchase', amount,
-        reference_type='grn', reference_id=grn_id,
-        reference_number=grn_number, user_id=user_id, notes=notes,
+        reference_type='grn' if grn_id else 'invoice',
+        reference_id=grn_id,
+        reference_number=ref,
+        notes=notes,
+        user_id=user_id,
+        created_at=created_at,
+        commit=commit,
     )
 
 
 def post_payment(
     supplier_id, amount, *,
-    payment_method='cash', reference_number=None, notes=None, user_id=None, commit=True,
+    payment_method='cash', reference_number=None, notes=None,
+    user_id=None, created_at=None, commit=True,
 ):
     amount = float(amount)
     if amount <= 0:
@@ -111,6 +126,7 @@ def post_payment(
         payment_method=payment_method,
         notes=notes,
         user_id=user_id,
+        created_at=created_at,
         commit=commit,
     )
 
