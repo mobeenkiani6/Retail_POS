@@ -63,10 +63,10 @@ def inventory_summary(current_user):
             'min_stock': min_s,
             'reorder_level': (sku.reorder_level if sku else p.reorder_qty) or 0,
         }
-        if min_s > 0 and r.stock_level <= min_s:
-            low_stock.append(entry)
         if r.stock_level == 0:
             out_of_stock.append(entry)
+        elif min_s > 0 and r.stock_level <= min_s:
+            low_stock.append(entry)
     return jsonify({
         'branch_id': branch_id,
         'total_skus': total_skus,

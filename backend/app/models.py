@@ -306,7 +306,8 @@ class GoodsReceivedNote(db.Model):
     branch_id = db.Column(db.String(36), db.ForeignKey('branches.id'), nullable=False)
     supplier_id = db.Column(db.Integer, db.ForeignKey('suppliers.id'), nullable=True)
     grn_number = db.Column(db.String(50), unique=True, nullable=False)
-    status = db.Column(db.String(30), default='draft')  # draft, received, cancelled
+    # draft (=active), partial, received (=completed), cancelled, deleted
+    status = db.Column(db.String(30), default='draft')
     received_at = db.Column(db.DateTime(timezone=True), nullable=True)
     notes = db.Column(db.Text)
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
@@ -323,7 +324,8 @@ class GRNItem(db.Model):
     product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
     sku_id = db.Column(db.Integer, db.ForeignKey('product_skus.id'), nullable=True)
     batch_number = db.Column(db.String(100), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)  # ordered qty (in receive_unit)
+    received_quantity = db.Column(db.Integer, nullable=False, default=0)  # cumulative received
     # unit | carton | packet — quantity is counted in this packaging unit
     receive_unit = db.Column(db.String(20), nullable=False, default='unit')
     cost_price = db.Column(db.Numeric(12, 2), nullable=False)

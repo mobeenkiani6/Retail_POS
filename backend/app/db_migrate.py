@@ -127,6 +127,14 @@ MIGRATIONS = [
     "ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS sku_id INTEGER REFERENCES product_skus(id)",
     "ALTER TABLE grn_items ADD COLUMN IF NOT EXISTS sku_id INTEGER REFERENCES product_skus(id)",
     "ALTER TABLE grn_items ADD COLUMN IF NOT EXISTS receive_unit VARCHAR(20) DEFAULT 'unit'",
+    "ALTER TABLE grn_items ADD COLUMN IF NOT EXISTS received_quantity INTEGER NOT NULL DEFAULT 0",
+    # Backfill fully received POs so remaining qty is zero
+    """UPDATE grn_items gi
+       SET received_quantity = gi.quantity
+       FROM goods_received_notes g
+       WHERE gi.grn_id = g.id
+         AND g.status = 'received'
+         AND COALESCE(gi.received_quantity, 0) = 0""",
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS carton_qty NUMERIC(12,3) DEFAULT 0",
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS carton_unit VARCHAR(20)",
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS packet_qty NUMERIC(12,3) DEFAULT 0",

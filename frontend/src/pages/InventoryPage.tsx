@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   Package, Loader2, History, AlertTriangle,
-  TrendingDown, DollarSign, Boxes, Pencil,
+  TrendingDown, DollarSign, Boxes, Pencil, Archive, Trash2,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import DataTable from '../components/ui/DataTable';
@@ -13,9 +13,10 @@ import Badge from '../components/ui/Badge';
 import StatCard from '../components/ui/StatCard';
 import EmptyState from '../components/ui/EmptyState';
 import SearchInput from '../components/ui/SearchInput';
-import { get, post, getUserMessage } from '../api';
+import { get, post, patch, del, getUserMessage } from '../api';
 import { formatCurrency } from '../utils/formatCurrency';
 import { showToast } from '../components/Toast';
+import { showConfirm } from '../components/ConfirmDialog';
 import { useScanner } from '../hooks/useScanner';
 
 import { formatSkuLabel, type ProductSku } from '../utils/productSkus';
@@ -46,10 +47,16 @@ type Movement = {
   reason_label?: string; notes?: string; created_at?: string;
 };
 
+type StockAlert = {
+  product_id: number; sku_id?: number; name: string; display_label?: string;
+  barcode?: string; stock_level: number; min_stock: number; reorder_level?: number;
+};
+
 type Summary = {
   total_skus: number; total_units: number; total_value: number;
   low_stock_count: number; out_of_stock_count: number;
-  low_stock: { product_id: number; sku_id?: number; name: string; display_label?: string; stock_level: number; min_stock: number }[];
+  low_stock: StockAlert[];
+  out_of_stock: StockAlert[];
 };
 
 function AdjustStockContent({
@@ -301,6 +308,57 @@ export default function InventoryPage() {
     if (row.id != null) setStockModal(row.id, row.product_id);
   };
 
+  const openAlertAdjust = (alert: StockAlert) => {
+    const row = alert.sku_id != null
+      ? skuRows.find(s => s.id === alert.sku_id)
+      : skuRows.find(s => s.product_id === alert.product_id);
+    if (row) openStockModal(row);
+    else showToast('SKU not found — refresh inventory and try again', 'error');
+  };
+
+  const handleArchive = async (row: SkuRow) => {
+    const ok = await showConfirm({
+      title: 'Archive Product',
+      message: `Archive "${row.product_name}" and all of its SKUs? It will leave inventory and POS until restored from Products.`,
+      relatedEffects: [
+        'Stock history is kept.',
+        'You can restore the product later from Products.',
+      ],
+      variant: 'danger',
+      confirmLabel: 'Archive',
+    });
+    if (!ok) return;
+    try {
+      await patch(`/products/${row.product_id}/archive`, {});
+      showToast('Product archived', 'success');
+      fetchData();
+    } catch (e) {
+      showToast(getUserMessage(e), 'error');
+    }
+  };
+
+  const handleDelete = async (row: SkuRow) => {
+    const ok = await showConfirm({
+      title: 'Delete Product?',
+      message: `"${row.product_name}" will be removed permanently. This cannot be undone.`,
+      relatedEffects: [
+        'All SKUs and stock for this product will be deleted.',
+        'Past sale lines will be kept and show as an unknown product.',
+        'If the product appears on receiving notes (GRN), deletion is blocked — archive instead.',
+      ],
+      confirmLabel: 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await del(`/products/${row.product_id}`);
+      showToast('Product deleted', 'success');
+      fetchData();
+    } catch (e) {
+      showToast(getUserMessage(e), 'error');
+    }
+  };
+
   const adjustStock = async (
     skuId: number,
     productId: number,
@@ -370,9 +428,62 @@ export default function InventoryPage() {
       <span className="text-sm tabular-nums">{formatCurrency((s.stock_level ?? 0) * s.cost_price)}</span>
     )},
     { key: 'actions', header: '', sortable: false, render: (s: SkuRow) => (
-      <button type="button" onClick={() => openStockModal(s)} className="p-2 rounded-lg hover:bg-canvas-subtle text-muted hover:text-foreground" title="Adjust stock"><Pencil className="w-4 h-4" /></button>
+      <div className="flex items-center justify-end gap-0.5">
+        <button type="button" onClick={() => openStockModal(s)} className="p-2 rounded-lg hover:bg-canvas-subtle text-muted hover:text-foreground" title="Adjust stock">
+          <Pencil className="w-4 h-4" />
+        </button>
+        <button type="button" onClick={() => handleArchive(s)} className="p-2 rounded-lg hover:bg-canvas-subtle text-muted hover:text-foreground" title="Archive product">
+          <Archive className="w-4 h-4" />
+        </button>
+        <button type="button" onClick={() => handleDelete(s)} className="p-2 rounded-lg hover:bg-danger-soft text-muted hover:text-danger" title="Delete product">
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
     )},
   ];
+
+  const alertCount = (summary?.low_stock_count ?? 0) + (summary?.out_of_stock_count ?? 0);
+
+  const renderAlertCard = (alert: StockAlert, variant: 'warning' | 'danger') => {
+    const isOut = variant === 'danger';
+    const suggested = Math.max(
+      0,
+      (alert.reorder_level || alert.min_stock || 0) - alert.stock_level,
+    );
+    return (
+      <motion.div
+        key={`${variant}-${alert.sku_id ?? alert.product_id}-${alert.display_label ?? alert.name}`}
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border ${
+          isOut ? 'border-danger/30 bg-danger-soft' : 'border-warning/30 bg-warning-soft'
+        }`}
+      >
+        <div className="min-w-0">
+          <p className="font-medium text-sm truncate">
+            {alert.display_label ? `${alert.name} — ${alert.display_label}` : alert.name}
+          </p>
+          <p className="text-xs text-muted mt-0.5">
+            {isOut ? 'Out of stock' : `Low stock · ${alert.stock_level} left`}
+            {alert.min_stock > 0 ? ` · Min ${alert.min_stock}` : ''}
+            {suggested > 0 ? ` · Order ~${suggested} to restock` : ''}
+            {alert.barcode ? ` · ${alert.barcode}` : ''}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Badge variant={isOut ? 'danger' : 'warning'}>
+            {isOut ? 'Out' : `${alert.stock_level} left`}
+          </Badge>
+          <Button type="button" variant="secondary" size="sm" onClick={() => openAlertAdjust(alert)}>
+            <Pencil className="w-3.5 h-3.5" /> Adjust
+          </Button>
+          <Link to="/grn">
+            <Button type="button" size="sm">Restock</Button>
+          </Link>
+        </div>
+      </motion.div>
+    );
+  };
 
   return (
     <div className="flex-1 overflow-auto p-6 lg:p-8">
@@ -387,14 +498,31 @@ export default function InventoryPage() {
           <StatCard label="Total SKUs" value={String(summary.total_skus)} icon={Package} />
           <StatCard label="Total Units" value={String(summary.total_units)} icon={Boxes} />
           <StatCard label="Stock Value" value={formatCurrency(summary.total_value)} icon={DollarSign} />
-          <StatCard label="Low Stock" value={String(summary.low_stock_count)} icon={TrendingDown} />
+          <button
+            type="button"
+            onClick={() => setTab('alerts')}
+            className="text-left rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-500"
+            title="View stock alerts"
+          >
+            <StatCard
+              label="Needs Restock"
+              value={String(alertCount)}
+              sub={alertCount > 0 ? `${summary.out_of_stock_count} out · ${summary.low_stock_count} low` : 'All stocked'}
+              icon={TrendingDown}
+            />
+          </button>
         </div>
       )}
 
       <div className="flex gap-1 mb-4 p-1 bg-canvas-subtle rounded-xl w-fit border border-border">
         {(['stock', 'history', 'alerts'] as const).map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors capitalize ${tab === t ? 'bg-surface shadow-soft text-foreground' : 'text-muted hover:text-foreground'}`}>
+          <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors capitalize inline-flex items-center gap-2 ${tab === t ? 'bg-surface shadow-soft text-foreground' : 'text-muted hover:text-foreground'}`}>
             {t === 'stock' ? 'Stock' : t === 'history' ? 'History' : 'Alerts'}
+            {t === 'alerts' && alertCount > 0 && (
+              <span className="min-w-[1.25rem] h-5 px-1.5 rounded-md bg-warning text-white text-[10px] font-bold inline-flex items-center justify-center">
+                {alertCount}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -448,25 +576,38 @@ export default function InventoryPage() {
       )}
 
       {tab === 'alerts' && summary && (
-        <div className="space-y-4">
-          {summary.low_stock.length === 0 && summary.out_of_stock_count === 0 ? (
-            <EmptyState icon={AlertTriangle} title="All good" description="No low stock or out-of-stock alerts." />
+        <div className="space-y-6">
+          {alertCount === 0 ? (
+            <EmptyState
+              icon={AlertTriangle}
+              title="All good"
+              description="No low stock or out-of-stock items. Set a min stock on products to get restock alerts."
+            />
           ) : (
             <>
-              {summary.low_stock.map(p => (
-                <motion.div
-                  key={p.sku_id ?? `${p.product_id}-${p.display_label ?? p.name}`}
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="flex items-center justify-between p-4 rounded-xl border border-warning/30 bg-warning-soft"
-                >
-                  <div>
-                    <p className="font-medium text-sm">{p.display_label ? `${p.name} — ${p.display_label}` : p.name}</p>
-                    <p className="text-xs text-muted">Min: {p.min_stock}</p>
+              <p className="text-sm text-muted">
+                Items below minimum stock or sold out — adjust on hand or open Restock (GRN) to order more.
+              </p>
+
+              {summary.out_of_stock.length > 0 && (
+                <section className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-semibold">Out of stock</h3>
+                    <Badge variant="danger">{summary.out_of_stock.length}</Badge>
                   </div>
-                  <Badge variant="warning">{p.stock_level} left</Badge>
-                </motion.div>
-              ))}
+                  {summary.out_of_stock.map(a => renderAlertCard(a, 'danger'))}
+                </section>
+              )}
+
+              {summary.low_stock.length > 0 && (
+                <section className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-semibold">Low stock</h3>
+                    <Badge variant="warning">{summary.low_stock.length}</Badge>
+                  </div>
+                  {summary.low_stock.map(a => renderAlertCard(a, 'warning'))}
+                </section>
+              )}
             </>
           )}
         </div>

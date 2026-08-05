@@ -1,7 +1,10 @@
 from flask import Blueprint, request, jsonify
-from app.models import db, GoodsReceivedNote
+from app.models import db, GoodsReceivedNote, GRNItem, ProductSku
 from app.utils.auth_decorators import token_required, role_required
-from app.services.grn_service import create_grn, receive_grn, cancel_grn, grn_to_dict
+from app.services.grn_service import (
+    create_grn, receive_grn, cancel_grn, soft_delete_grn, grn_to_dict,
+    CATEGORY_STATUSES, _normalize_receive_unit,
+)
 from app.errors import error_response
 from app.branch_scope import resolve_branch_id, require_branch_id
 
@@ -17,9 +20,14 @@ def _resolve_branch(current_user, data):
 @token_required
 def list_grns(current_user):
     branch_id = resolve_branch_id(current_user, request.args.get('branch_id'))
+    category = (request.args.get('category') or request.args.get('status') or '').strip().lower()
     query = GoodsReceivedNote.query
     if branch_id:
         query = query.filter_by(branch_id=branch_id)
+    if category and category in CATEGORY_STATUSES:
+        query = query.filter(GoodsReceivedNote.status.in_(CATEGORY_STATUSES[category]))
+    elif category in ('draft', 'partial', 'received', 'deleted', 'cancelled'):
+        query = query.filter_by(status=category)
     grns = query.order_by(GoodsReceivedNote.created_at.desc()).all()
     return jsonify({'grns': [grn_to_dict(g) for g in grns]}), 200
 
@@ -60,12 +68,20 @@ def receive_grn_route(current_user, grn_id):
     grn = GoodsReceivedNote.query.get_or_404(grn_id)
     if current_user.role != 'owner' and grn.branch_id != current_user.branch_id:
         return error_response('Forbidden', 'Unauthorized', 403)
+    data = request.get_json(silent=True) or {}
+    mode = data.get('mode') or ('partial' if data.get('items') else 'complete')
     try:
-        grn = receive_grn(grn_id, current_user.id)
+        grn = receive_grn(
+            grn_id,
+            current_user.id,
+            items=data.get('items'),
+            mode=mode,
+        )
         payload = grn_to_dict(grn)
+        label = 'completed' if payload.get('category') == 'completed' else 'updated'
         return jsonify({
             'grn': payload,
-            'message': 'GRN received successfully',
+            'message': f'Purchase order {label} — stock added to inventory',
             'price_warnings': payload.get('price_warnings') or [],
         }), 200
     except ValueError as e:
@@ -78,36 +94,29 @@ def receive_grn_route(current_user, grn_id):
 def update_grn_route(current_user, grn_id):
     grn = GoodsReceivedNote.query.get_or_404(grn_id)
     if grn.status != 'draft':
-        return error_response('Bad Request', 'Only draft GRNs can be edited', 400)
+        return error_response('Bad Request', 'Only active (draft) purchase orders can be edited', 400)
     data = request.get_json() or {}
     if 'supplier_id' in data:
         grn.supplier_id = data['supplier_id']
     if 'notes' in data:
         grn.notes = data['notes']
     if 'items' in data:
-        from app.models import GRNItem
         GRNItem.query.filter_by(grn_id=grn.id).delete()
         for item in data['items']:
             sku_id = item.get('sku_id')
             product_id = item['product_id']
             if sku_id:
-                from app.models import ProductSku
                 sku = ProductSku.query.get(int(sku_id))
                 if sku:
                     product_id = sku.product_id
-            ru = (item.get('receive_unit') or 'unit').strip().lower()
-            if ru in ('carton', 'cartons', 'box', 'boxes'):
-                ru = 'carton'
-            elif ru in ('packet', 'packets', 'pack', 'packs', 'pkt'):
-                ru = 'packet'
-            else:
-                ru = 'unit'
+            ru = _normalize_receive_unit(item.get('receive_unit'))
             grn_item = GRNItem(
                 grn_id=grn.id,
                 product_id=product_id,
                 sku_id=int(sku_id) if sku_id else None,
                 batch_number=item.get('batch_number') or 'N/A',
                 quantity=int(item['quantity']),
+                received_quantity=0,
                 receive_unit=ru,
                 cost_price=item['cost_price'],
                 sell_price=item.get('sell_price', 0),
@@ -122,12 +131,11 @@ def update_grn_route(current_user, grn_id):
 @token_required
 @role_required('owner', 'manager')
 def delete_grn_route(current_user, grn_id):
-    grn = GoodsReceivedNote.query.get_or_404(grn_id)
-    if grn.status == 'received':
-        return error_response('Bad Request', 'Cannot delete received GRN', 400)
-    db.session.delete(grn)
-    db.session.commit()
-    return jsonify({'message': 'GRN deleted'}), 200
+    try:
+        grn = soft_delete_grn(grn_id)
+        return jsonify({'grn': grn_to_dict(grn), 'message': 'Purchase order deleted'}), 200
+    except ValueError as e:
+        return error_response('Bad Request', str(e), 400)
 
 
 @grn_bp.route('/<int:grn_id>/duplicate', methods=['POST'])
@@ -153,6 +161,6 @@ def duplicate_grn_route(current_user, grn_id):
 def cancel_grn_route(current_user, grn_id):
     try:
         grn = cancel_grn(grn_id)
-        return jsonify({'grn': grn_to_dict(grn), 'message': 'GRN cancelled'}), 200
+        return jsonify({'grn': grn_to_dict(grn), 'message': 'Purchase order deleted'}), 200
     except ValueError as e:
         return error_response('Bad Request', str(e), 400)

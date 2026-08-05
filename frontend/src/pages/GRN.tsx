@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
-import { Plus, CheckCircle, XCircle, Copy, Trash2, Edit2, Printer, ChevronDown, ChevronRight } from 'lucide-react';
+import { useEffect, useState, useMemo } from 'react';
+import { Plus, CheckCircle, PackageCheck, Copy, Trash2, Edit2, Printer, ChevronDown, ChevronRight } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import Button from '../components/ui/Button';
 import StatusBadge from '../components/ui/StatusBadge';
-import DataTable from '../components/ui/DataTable';
 import Modal from '../components/ui/Modal';
 import Input from '../components/ui/Input';
+import EmptyState from '../components/ui/EmptyState';
 import { get, post, put, del, getUserMessage } from '../api';
 import { formatCurrency } from '../utils/formatCurrency';
 import { showToast } from '../components/Toast';
@@ -21,6 +21,9 @@ type GRNItem = {
   product_name?: string;
   sku_label?: string;
   quantity: number;
+  ordered_quantity?: number;
+  received_quantity?: number;
+  remaining_quantity?: number;
   receive_unit?: 'unit' | 'carton' | 'packet';
   cost_price: number;
   sell_price: number;
@@ -32,10 +35,37 @@ type GRN = {
   supplier_id?: number;
   supplier_name?: string;
   status: string;
+  category?: string;
   notes?: string;
   created_at?: string;
+  ordered_quantity?: number;
+  received_quantity?: number;
+  remaining_quantity?: number;
   items: GRNItem[];
 };
+
+type PoCategory = 'active' | 'completed' | 'partial' | 'deleted';
+
+const PO_CATEGORIES: { id: PoCategory; label: string }[] = [
+  { id: 'active', label: 'Active' },
+  { id: 'partial', label: 'Partial' },
+  { id: 'completed', label: 'Completed' },
+  { id: 'deleted', label: 'Deleted' },
+];
+
+function poCategory(g: GRN): PoCategory {
+  if (g.category === 'active' || g.category === 'completed' || g.category === 'partial' || g.category === 'deleted') {
+    return g.category;
+  }
+  if (g.status === 'draft') return 'active';
+  if (g.status === 'received') return 'completed';
+  if (g.status === 'partial') return 'partial';
+  return 'deleted';
+}
+
+function isReceivable(g: GRN) {
+  return g.status === 'draft' || g.status === 'partial';
+}
 
 type Product = {
   id: number;
@@ -123,6 +153,10 @@ export default function GRNPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
+  const [category, setCategory] = useState<PoCategory>('active');
+  const [partialGrn, setPartialGrn] = useState<GRN | null>(null);
+  const [partialQty, setPartialQty] = useState<Record<number, string>>({});
+  const [receiving, setReceiving] = useState(false);
 
   const {
     modalOpen,
@@ -160,6 +194,17 @@ export default function GRNPage() {
   };
 
   useEffect(() => { load(); }, []);
+
+  const filteredGrns = useMemo(
+    () => grns.filter(g => poCategory(g) === category),
+    [grns, category],
+  );
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<PoCategory, number> = { active: 0, completed: 0, partial: 0, deleted: 0 };
+    for (const g of grns) counts[poCategory(g)] += 1;
+    return counts;
+  }, [grns]);
 
   const openEdit = (grn: GRN) => {
     storeOpenEdit(
@@ -254,15 +299,22 @@ export default function GRNPage() {
     }
   };
 
-  const receiveGrn = async (id: number) => {
-    const ok = await showConfirm({ title: 'Receive Stock', message: 'This will add quantities to inventory and update purchase costs. Continue?' });
-    if (!ok) return;
+  const applyReceiveResult = async (
+    id: number,
+    body: { mode: 'complete' | 'partial'; items?: { id: number; quantity: number }[] },
+  ) => {
+    setReceiving(true);
     try {
       const res = await post<{
         message?: string;
+        grn?: GRN;
         price_warnings?: { name: string; variant?: string; cost_price: number; sell_price: number }[];
-      }>(`/v1/grn/${id}/receive`, {});
-      showToast('Stock received successfully', 'success');
+      }>(`/v1/grn/${id}/receive`, body);
+      const cat = res?.grn ? poCategory(res.grn) : 'completed';
+      showToast(
+        cat === 'completed' ? 'Stock fully received — inventory updated' : 'Partial stock received — inventory updated',
+        'success',
+      );
       const warnings = res?.price_warnings || [];
       for (const w of warnings) {
         const label = w.variant ? `${w.name} (${w.variant})` : w.name;
@@ -272,32 +324,88 @@ export default function GRNPage() {
         );
       }
       if (editing?.id === id) clearDraft();
+      setPartialGrn(null);
+      setPartialQty({});
+      if (cat === 'partial') setCategory('partial');
+      else if (cat === 'completed') setCategory('completed');
+      await load();
+    } catch (e) {
+      showToast(getUserMessage(e), 'error');
+    } finally {
+      setReceiving(false);
+    }
+  };
+
+  const receiveComplete = async (g: GRN) => {
+    const rem = g.remaining_quantity ?? g.items.reduce(
+      (s, i) => s + (i.remaining_quantity ?? Math.max(0, i.quantity - (i.received_quantity || 0))),
+      0,
+    );
+    const ok = await showConfirm({
+      title: 'Complete Stock Received',
+      message: `Receive all remaining stock (${rem} units) for ${g.grn_number}? Quantities will be added to inventory.`,
+      confirmLabel: 'Receive all',
+    });
+    if (!ok) return;
+    await applyReceiveResult(g.id, { mode: 'complete' });
+  };
+
+  const openPartialReceive = (g: GRN) => {
+    const initial: Record<number, string> = {};
+    for (const item of g.items) {
+      if (item.id == null) continue;
+      const rem = item.remaining_quantity ?? Math.max(0, item.quantity - (item.received_quantity || 0));
+      if (rem > 0) initial[item.id] = '';
+    }
+    setPartialQty(initial);
+    setPartialGrn(g);
+  };
+
+  const submitPartialReceive = async () => {
+    if (!partialGrn) return;
+    const items = Object.entries(partialQty)
+      .map(([id, val]) => ({ id: parseInt(id, 10), quantity: parseInt(val, 10) || 0 }))
+      .filter(i => i.quantity > 0);
+    if (!items.length) {
+      showToast('Enter at least one quantity to receive', 'error');
+      return;
+    }
+    for (const row of items) {
+      const line = partialGrn.items.find(i => i.id === row.id);
+      const rem = line
+        ? (line.remaining_quantity ?? Math.max(0, line.quantity - (line.received_quantity || 0)))
+        : 0;
+      if (row.quantity > rem) {
+        showToast(`Cannot receive more than ${rem} remaining on a line`, 'error');
+        return;
+      }
+    }
+    await applyReceiveResult(partialGrn.id, { mode: 'partial', items });
+  };
+
+  const deleteGrn = async (id: number) => {
+    const ok = await showConfirm({
+      title: 'Delete Purchase Order',
+      message: 'Move this purchase order to Deleted? Already received stock stays in inventory.',
+      variant: 'danger',
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
+    try {
+      await del(`/v1/grn/${id}`);
+      showToast('Purchase order deleted', 'success');
+      if (editing?.id === id) clearDraft();
+      setCategory('deleted');
       load();
     } catch (e) {
       showToast(getUserMessage(e), 'error');
     }
   };
 
-  const cancelGrn = async (id: number) => {
-    const ok = await showConfirm({ title: 'Cancel', message: 'Cancel this draft receiving note?', variant: 'danger' });
-    if (!ok) return;
-    await post(`/v1/grn/${id}/cancel`, {});
-    showToast('Receiving note cancelled', 'success');
-    load();
-  };
-
   const duplicateGrn = async (id: number) => {
     await post(`/v1/grn/${id}/duplicate`, {});
-    showToast('Duplicated', 'success');
-    load();
-  };
-
-  const deleteGrn = async (id: number) => {
-    const ok = await showConfirm({ title: 'Delete', message: 'Permanently delete this draft?', variant: 'danger', confirmLabel: 'Delete' });
-    if (!ok) return;
-    await del(`/v1/grn/${id}`);
-    showToast('Deleted', 'success');
-    if (editing?.id === id) clearDraft();
+    showToast('Duplicated as a new active order', 'success');
+    setCategory('active');
     load();
   };
 
@@ -435,43 +543,188 @@ export default function GRNPage() {
       <PageHeader
         title="Purchase Receiving"
         description="Receive supplier deliveries and add stock to inventory"
-        actions={<Button onClick={openCreate}><Plus className="w-4 h-4" /> New Receiving</Button>}
+        actions={<Button onClick={openCreate}><Plus className="w-4 h-4" /> New Purchase Order</Button>}
       />
 
-      <DataTable
-        loading={loading}
-        data={grns as unknown as Record<string, unknown>[]}
-        emptyMessage="No receiving notes yet"
-        columns={[
-          { key: 'grn_number', header: 'Reference #', render: r => <span className="font-mono text-sm font-medium">{String(r.grn_number)}</span> },
-          { key: 'supplier_name', header: 'Supplier', render: r => String(r.supplier_name || '—') },
-          { key: 'items', header: 'Lines', render: r => `${(r.items as GRNItem[])?.length ?? 0}` },
-          { key: 'status', header: 'Status', render: r => <StatusBadge status={String(r.status)} /> },
-          { key: 'created_at', header: 'Created', render: r => r.created_at ? new Date(String(r.created_at)).toLocaleDateString() : '—' },
-        ]}
-        actions={r => {
-          const g = r as unknown as GRN;
-          return (
-            <div className="flex gap-1">
-              {g.status === 'draft' && (
-                <>
-                  <button type="button" onClick={() => openEdit(g)} className="p-1.5 rounded-lg hover:bg-canvas-subtle text-muted" title="Edit"><Edit2 className="w-3.5 h-3.5" /></button>
-                  <button type="button" onClick={() => receiveGrn(g.id)} className="p-1.5 rounded-lg hover:bg-success-soft text-success" title="Receive"><CheckCircle className="w-3.5 h-3.5" /></button>
-                  <button type="button" onClick={() => cancelGrn(g.id)} className="p-1.5 rounded-lg hover:bg-warning-soft text-warning" title="Cancel"><XCircle className="w-3.5 h-3.5" /></button>
-                  <button type="button" onClick={() => deleteGrn(g.id)} className="p-1.5 rounded-lg hover:bg-danger-soft text-danger" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
-                </>
-              )}
-              <button type="button" onClick={() => duplicateGrn(g.id)} className="p-1.5 rounded-lg hover:bg-canvas-subtle text-muted" title="Duplicate"><Copy className="w-3.5 h-3.5" /></button>
-              <button type="button" onClick={() => printGrn(g)} className="p-1.5 rounded-lg hover:bg-canvas-subtle text-muted" title="Print"><Printer className="w-3.5 h-3.5" /></button>
+      <div className="flex flex-wrap gap-2 mb-5">
+        {PO_CATEGORIES.map(c => (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => setCategory(c.id)}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+              category === c.id
+                ? 'border-accent-600 bg-accent-600 text-white'
+                : 'border-border bg-surface text-muted hover:text-foreground hover:border-accent-300'
+            }`}
+          >
+            {c.label}
+            <span className={`ml-1.5 tabular-nums ${category === c.id ? 'text-white/80' : 'text-muted'}`}>
+              {categoryCounts[c.id]}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-muted py-16 text-center">Loading purchase orders…</p>
+      ) : filteredGrns.length === 0 ? (
+        <EmptyState
+          icon={PackageCheck}
+          title={`No ${category} purchase orders`}
+          description={category === 'active' ? 'Create a purchase order to start receiving stock.' : 'Switch category or create a new order.'}
+        />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {filteredGrns.map(g => {
+            const ordered = g.ordered_quantity ?? g.items.reduce((s, i) => s + (i.quantity || 0), 0);
+            const received = g.received_quantity ?? g.items.reduce((s, i) => s + (i.received_quantity || 0), 0);
+            const remaining = g.remaining_quantity ?? Math.max(0, ordered - received);
+            const lineCost = g.items.reduce(
+              (s, i) => s + (Number(i.quantity) || 0) * (Number(i.cost_price) || 0),
+              0,
+            );
+            const receivable = isReceivable(g);
+            return (
+              <div key={g.id} className="surface-card p-5 flex flex-col gap-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <h4 className="font-semibold text-foreground truncate">{g.grn_number}</h4>
+                    <p className="text-xs text-muted font-mono">{g.supplier_name || 'No supplier'}</p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {g.status === 'draft' && (
+                      <button type="button" onClick={() => openEdit(g)} className="p-1.5 rounded-lg hover:bg-canvas-subtle text-muted" title="Edit">
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {category !== 'deleted' && (
+                      <button type="button" onClick={() => deleteGrn(g.id)} className="p-1.5 rounded-lg hover:bg-canvas-subtle text-muted" title="Delete">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <StatusBadge status={g.status} />
+                  </div>
+                </div>
+
+                <div className="text-sm space-y-1">
+                  <p className="text-muted">
+                    Lines: <span className="text-foreground">{g.items?.length ?? 0}</span>
+                    {' · '}
+                    Progress:{' '}
+                    <span className="text-foreground font-medium">{received}/{ordered}</span>
+                    {remaining > 0 && category !== 'completed' ? (
+                      <span className="text-warning"> · {remaining} left</span>
+                    ) : null}
+                  </p>
+                  <p className="text-muted">
+                    Order value:{' '}
+                    <span className="text-foreground font-medium">{formatCurrency(lineCost)}</span>
+                  </p>
+                  <p className="text-muted">
+                    Created:{' '}
+                    <span className="text-foreground">
+                      {g.created_at ? new Date(g.created_at).toLocaleDateString() : '—'}
+                    </span>
+                  </p>
+                  {g.notes ? <p className="text-xs text-muted truncate" title={g.notes}>{g.notes}</p> : null}
+                </div>
+
+                <div className="flex flex-col gap-2 mt-auto pt-1">
+                  {receivable && (
+                    <>
+                      <Button className="w-full" onClick={() => receiveComplete(g)} disabled={receiving}>
+                        <CheckCircle className="w-4 h-4" /> Complete received
+                      </Button>
+                      <Button variant="secondary" className="w-full" onClick={() => openPartialReceive(g)} disabled={receiving}>
+                        <PackageCheck className="w-4 h-4" /> Partial received
+                      </Button>
+                    </>
+                  )}
+                  <div className="flex gap-2">
+                    <Button variant="secondary" className="flex-1" onClick={() => duplicateGrn(g.id)}>
+                      <Copy className="w-4 h-4" /> Duplicate
+                    </Button>
+                    <Button variant="secondary" className="flex-1" onClick={() => printGrn(g)}>
+                      <Printer className="w-4 h-4" /> Print
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Partial receive modal */}
+      <Modal
+        open={!!partialGrn}
+        onClose={() => { if (!receiving) { setPartialGrn(null); setPartialQty({}); } }}
+        title={partialGrn ? `Partial receive — ${partialGrn.grn_number}` : 'Partial receive'}
+        size="lg"
+        footer={
+          <>
+            <Button variant="secondary" disabled={receiving} onClick={() => { setPartialGrn(null); setPartialQty({}); }}>
+              Cancel
+            </Button>
+            <Button disabled={receiving} onClick={submitPartialReceive}>
+              {receiving ? 'Receiving…' : 'Receive & update inventory'}
+            </Button>
+          </>
+        }
+      >
+        {partialGrn && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted">
+              Enter how much arrived now for each line. Stock is added to inventory immediately; remaining stays on this order.
+            </p>
+            <div className="space-y-2 max-h-[50vh] overflow-auto">
+              {partialGrn.items.map(item => {
+                if (item.id == null) return null;
+                const rem = item.remaining_quantity ?? Math.max(0, item.quantity - (item.received_quantity || 0));
+                if (rem <= 0) {
+                  return (
+                    <div key={item.id} className="flex items-center justify-between px-3 py-2 rounded-xl border border-border bg-canvas-subtle text-sm opacity-70">
+                      <span className="truncate">{item.product_name || `Product #${item.product_id}`}{item.sku_label ? ` — ${item.sku_label}` : ''}</span>
+                      <span className="text-xs text-success shrink-0">Fully received</span>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={item.id} className="flex flex-col sm:flex-row sm:items-center gap-2 px-3 py-3 rounded-xl border border-border bg-surface">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">
+                        {item.product_name || `Product #${item.product_id}`}
+                        {item.sku_label ? ` — ${item.sku_label}` : ''}
+                      </p>
+                      <p className="text-xs text-muted">
+                        Ordered {item.quantity} · Received {item.received_quantity || 0} · Remaining {rem}
+                        {' '}{item.receive_unit || 'unit'}
+                      </p>
+                    </div>
+                    <div className="w-full sm:w-28 shrink-0">
+                      <Input
+                        label="Receive now"
+                        type="number"
+                        min={0}
+                        max={rem}
+                        value={partialQty[item.id] ?? ''}
+                        onChange={e => setPartialQty(prev => ({ ...prev, [item.id!]: e.target.value }))}
+                        placeholder={`0–${rem}`}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          );
-        }}
-      />
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={modalOpen}
         onClose={closeModal}
-        title={editing ? `Edit ${editing.grn_number}` : 'New Purchase Receiving'}
+        title={editing ? `Edit ${editing.grn_number}` : 'New Purchase Order'}
         size="2xl"
         footer={<><Button variant="secondary" onClick={closeModal}>Cancel</Button><Button onClick={handleSave}>{editing ? 'Save Changes' : 'Create Draft'}</Button></>}
       >
