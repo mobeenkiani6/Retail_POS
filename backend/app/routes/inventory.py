@@ -155,6 +155,15 @@ def adjust_inventory(current_user):
             sku_id=int(sku_id) if sku_id else None,
         )
         db.session.commit()
+        try:
+            from app.services import event_bus
+            event_bus.inventory_changed(
+                branch_id, product_id=product_id,
+                sku_id=int(sku_id) if sku_id else None,
+                stock_level=row.stock_level, reason=reason,
+            )
+        except Exception:
+            pass
         return jsonify({
             'message': 'Inventory adjusted',
             'stock_level': row.stock_level,

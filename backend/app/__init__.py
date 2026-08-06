@@ -108,6 +108,9 @@ def create_app():
     from app.routes.units import units_bp
     from app.routes.brands import brands_bp
     from app.routes.variant_options import variant_options_bp
+    from app.routes.batches import batches_bp
+    from app.routes.inventory_health import inventory_health_bp
+    from app.routes.admin import admin_bp
 
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(products_bp, url_prefix='/api/products')
@@ -130,5 +133,16 @@ def create_app():
     app.register_blueprint(units_bp, url_prefix='/api/v1/units')
     app.register_blueprint(brands_bp, url_prefix='/api/v1/brands')
     app.register_blueprint(variant_options_bp, url_prefix='/api/v1/variant-options')
+    app.register_blueprint(batches_bp, url_prefix='/api/v1/batches')
+    app.register_blueprint(inventory_health_bp, url_prefix='/api/v1/inventory-health')
+    app.register_blueprint(admin_bp, url_prefix='/api/v1/admin')
+
+    # Register Socket.IO event handlers (avoid `import app.*` which rebinds local `app`)
+    import importlib
+    importlib.import_module('app.routes.admin.events')
+
+    # Auto-drain sync outbox so admin/cloud stay current without manual Retry
+    from app.services.sync_service import start_sync_worker
+    start_sync_worker(app)
 
     return app

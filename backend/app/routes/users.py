@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 from app.models import db, User
-from app.utils.auth_decorators import token_required, owner_required
+from app.utils.auth_decorators import token_required, owner_required, admin_owner_required
 from app.branch_scope import resolve_branch_id
 from werkzeug.security import generate_password_hash
 
@@ -14,7 +14,8 @@ def _user_to_dict(u):
         'role': u.role,
         'branch_id': u.branch_id,
         'branch_name': u.branch.name if u.branch else 'Unassigned',
-        'created_at': u.created_at.isoformat() if u.created_at else None
+        'created_at': u.created_at.isoformat() if u.created_at else None,
+        'last_login_at': u.last_login_at.isoformat() if getattr(u, 'last_login_at', None) else None,
     }
     if hasattr(u, 'archived_at') and u.archived_at:
         d['archived_at'] = u.archived_at.isoformat()
@@ -22,7 +23,7 @@ def _user_to_dict(u):
 
 @users_bp.route('/', methods=['GET'])
 @token_required
-@owner_required
+@admin_owner_required
 def get_users(current_user):
     include_archived = request.args.get('include_archived', '').lower() in ('1', 'true', 'yes')
     query = User.query
@@ -34,7 +35,7 @@ def get_users(current_user):
 
 @users_bp.route('/', methods=['POST'])
 @token_required
-@owner_required
+@admin_owner_required
 def create_user(current_user):
     data = request.get_json()
     if not data or not all(k in data for k in ("username", "password", "role")):
@@ -70,7 +71,7 @@ def create_user(current_user):
 
 @users_bp.route('/<int:user_id>', methods=['PUT'])
 @token_required
-@owner_required
+@admin_owner_required
 def update_user(current_user, user_id):
     data = request.get_json()
     if not data:
@@ -109,24 +110,24 @@ def update_user(current_user, user_id):
 
 @users_bp.route('/<int:user_id>/archive', methods=['PATCH'])
 @token_required
-@owner_required
+@admin_owner_required
 def archive_user(current_user, user_id):
     user = User.query.get_or_404(user_id)
     if user.id == current_user.id:
-        return jsonify({"message": "Cannot archive yourself."}), 400
+        return jsonify({"message": "Cannot delete yourself."}), 400
     if not hasattr(user, 'archived_at'):
         return jsonify({"message": "Archive not supported"}), 400
     try:
         user.archived_at = datetime.utcnow()
         db.session.commit()
-        return jsonify({'message': 'User archived', 'archived_at': user.archived_at.isoformat()}), 200
+        return jsonify({'message': 'User deleted', 'archived_at': user.archived_at.isoformat()}), 200
     except Exception as e:
         db.session.rollback()
         return jsonify({"message": str(e)}), 500
 
 @users_bp.route('/<int:user_id>/unarchive', methods=['PATCH'])
 @token_required
-@owner_required
+@admin_owner_required
 def unarchive_user(current_user, user_id):
     user = User.query.get_or_404(user_id)
     if not hasattr(user, 'archived_at'):
@@ -141,9 +142,9 @@ def unarchive_user(current_user, user_id):
 
 @users_bp.route('/<int:user_id>', methods=['DELETE'])
 @token_required
-@owner_required
+@admin_owner_required
 def delete_user(current_user, user_id):
-    """Permanent delete. Blocked if user has any sales."""
+    """Remove user: permanent delete if no sales, otherwise soft-archive."""
     from app.models import Sale
     user = User.query.get(user_id)
     if not user:
@@ -158,14 +159,18 @@ def delete_user(current_user, user_id):
             return jsonify({"message": "Cannot delete the last owner of the branch."}), 400
 
     sales_count = Sale.query.filter_by(user_id=user_id).count()
-    if sales_count > 0:
-        return jsonify({
-            "message": f"Cannot delete user — they have {sales_count} transaction(s). Archive the user instead."
-        }), 409
     try:
+        if sales_count > 0:
+            if not hasattr(user, 'archived_at'):
+                return jsonify({
+                    "message": f"Cannot delete user — they have {sales_count} transaction(s)."
+                }), 409
+            user.archived_at = datetime.utcnow()
+            db.session.commit()
+            return jsonify({"message": "User deleted"}), 200
         db.session.delete(user)
         db.session.commit()
-        return jsonify({"message": "User permanently deleted."}), 200
+        return jsonify({"message": "User deleted"}), 200
     except Exception as e:
         db.session.rollback()
         return jsonify({"message": "Error deleting user", "error": str(e)}), 500

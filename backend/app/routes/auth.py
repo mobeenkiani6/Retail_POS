@@ -112,13 +112,44 @@ def login():
     user = User.query.filter_by(username=data['username']).first()
 
     if not user or not check_password_hash(user.password_hash, data['password']):
+        try:
+            from app.models import LoginHistory
+            if user:
+                db.session.add(LoginHistory(
+                    user_id=user.id, success=False,
+                    ip_address=request.remote_addr,
+                    user_agent=(request.headers.get('User-Agent') or '')[:512],
+                ))
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
         return jsonify({'message': 'Invalid credentials'}), 401
     if getattr(user, 'archived_at', None):
         return jsonify({'message': 'Account is archived'}), 403
 
     if hasattr(user, 'last_login_at'):
         user.last_login_at = datetime.utcnow()
-        db.session.commit()
+
+    try:
+        from app.models import LoginHistory, UserSession
+        import uuid as _uuid
+        db.session.add(LoginHistory(
+            user_id=user.id, success=True,
+            ip_address=request.remote_addr,
+            user_agent=(request.headers.get('User-Agent') or '')[:512],
+        ))
+        jti = _uuid.uuid4().hex
+        db.session.add(UserSession(
+            user_id=user.id,
+            token_jti=jti,
+            ip_address=request.remote_addr,
+            user_agent=(request.headers.get('User-Agent') or '')[:512],
+            expires_at=datetime.utcnow() + timedelta(days=30),
+        ))
+    except Exception:
+        pass
+
+    db.session.commit()
 
     # Prefer configured BRANCH_ID so JWT always matches this POS instance
     try:

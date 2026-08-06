@@ -331,10 +331,13 @@ export default function SupplyChain() {
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold flex items-center gap-2"><Cloud className="w-4 h-4 text-accent-600" /> Cloud Sync Monitor</h3>
-          <Button size="sm" variant="secondary" onClick={flushSync} disabled={syncing}>
-            {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-            Retry Failed
-          </Button>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-fg-muted">Auto-sync on</span>
+            <Button size="sm" variant="secondary" onClick={flushSync} disabled={syncing}>
+              {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+              Sync Now
+            </Button>
+          </div>
         </div>
         <div className="grid grid-cols-3 gap-4 mb-4">
           <StatCard label="Pending" value={syncStatus?.pending ?? 0} icon={Clock} trend="Awaiting sync" />

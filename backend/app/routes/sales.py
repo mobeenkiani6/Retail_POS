@@ -393,6 +393,19 @@ def checkout(current_user):
         enqueue_sale(new_sale)
         db.session.commit()
 
+        try:
+            from app.services.sync_service import kick_sync
+            kick_sync()
+        except Exception:
+            pass
+
+        try:
+            from app.services import event_bus
+            event_bus.sale_completed(new_sale)
+            event_bus.inventory_changed(new_sale.branch_id, reason='sale')
+        except Exception:
+            pass
+
         from app.services.printer_service import PrinterService
         printer_service = PrinterService()
         print_success = printer_service.print_receipt(dict(receipt_data))
@@ -768,6 +781,12 @@ def _process_return(current_user, sale, data):
             details={'return_number': ret.return_number, 'refund_amount': float(refund_amount)},
         ))
         db.session.commit()
+        try:
+            from app.services import event_bus
+            event_bus.sale_completed(sale)
+            event_bus.inventory_changed(sale.branch_id, reason='return')
+        except Exception:
+            pass
         return jsonify({
             'message': 'Return processed' if action == 'sale.return' else 'Refund processed',
             'return': {'id': ret.id, 'return_number': ret.return_number, 'refund_amount': float(ret.refund_amount)},

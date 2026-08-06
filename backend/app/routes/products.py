@@ -256,6 +256,11 @@ def create_product(current_user):
         db.session.rollback()
         return error_response('Bad Request', str(e), 400)
     db.session.refresh(product)
+    try:
+        from app.services.event_bus import product_updated
+        product_updated(product.id, branch_id=branch_id, action='created')
+    except Exception:
+        pass
     return jsonify({'product': _product_to_dict(product, branch_id)}), 201
 
 
@@ -291,6 +296,11 @@ def update_product(current_user, product_id):
         db.session.rollback()
         return error_response('Bad Request', str(e), 400)
     db.session.refresh(product)
+    try:
+        from app.services.event_bus import product_updated
+        product_updated(product.id, branch_id=branch_id, action='updated')
+    except Exception:
+        pass
     return jsonify({'product': _product_to_dict(product, branch_id)}), 200
 
 

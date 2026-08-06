@@ -62,6 +62,8 @@ def operations_dashboard(current_user):
     )
 
     pending_sync = SyncOutbox.query.filter_by(status='pending').count()
+    failed_sync = SyncOutbox.query.filter_by(status='failed').count()
+    sync_backlog = pending_sync + failed_sync
     active_cashiers = User.query.filter(
         User.role.in_(['cashier', 'manager']),
         User.archived_at == None,
@@ -124,7 +126,7 @@ def operations_dashboard(current_user):
         'total_units': total_units,
         'customers_today': customers_today,
         'active_cashiers': active_cashiers,
-        'pending_sync': pending_sync,
+        'pending_sync': sync_backlog,
         'low_stock_count': low_stock,
         'out_of_stock_count': out_of_stock,
         'top_categories': top_cats,
@@ -140,5 +142,5 @@ def operations_dashboard(current_user):
             for r in recent
         ],
         'store_status': 'open',
-        'cloud_sync_status': 'online' if pending_sync == 0 else 'pending',
+        'cloud_sync_status': 'online' if sync_backlog == 0 else ('error' if failed_sync else 'pending'),
     }), 200

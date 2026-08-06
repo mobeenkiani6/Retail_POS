@@ -508,3 +508,157 @@ class Notification(db.Model):
     severity = db.Column(db.String(20), default='info')
     read = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+
+
+# ── Admin / HQ extensions ─────────────────────────────────────────────────────
+
+
+class ExpenseCategory(db.Model):
+    __tablename__ = 'expense_categories'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False, unique=True)
+    description = db.Column(db.Text)
+    active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+
+
+class Expense(db.Model):
+    __tablename__ = 'expenses'
+    id = db.Column(db.Integer, primary_key=True)
+    branch_id = db.Column(db.String(36), db.ForeignKey('branches.id'), nullable=True, index=True)
+    category_id = db.Column(db.Integer, db.ForeignKey('expense_categories.id'), nullable=True)
+    title = db.Column(db.String(255), nullable=False)
+    amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    payment_method = db.Column(db.String(50), nullable=True)
+    expense_date = db.Column(db.DateTime(timezone=True), default=datetime.utcnow, index=True)
+    notes = db.Column(db.Text)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    category = db.relationship('ExpenseCategory', backref='expenses', lazy=True)
+
+
+class LoyaltyTransaction(db.Model):
+    __tablename__ = 'loyalty_transactions'
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
+    sale_id = db.Column(db.Integer, db.ForeignKey('sales.id'), nullable=True)
+    points_delta = db.Column(db.Integer, nullable=False, default=0)
+    balance_after = db.Column(db.Integer, nullable=False, default=0)
+    reason = db.Column(db.String(100), nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+
+
+class CustomerNote(db.Model):
+    __tablename__ = 'customer_notes'
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
+    body = db.Column(db.Text, nullable=False)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+
+
+class CustomerAddress(db.Model):
+    __tablename__ = 'customer_addresses'
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
+    label = db.Column(db.String(50), default='home')
+    line1 = db.Column(db.String(255), nullable=False)
+    line2 = db.Column(db.String(255))
+    city = db.Column(db.String(100))
+    state = db.Column(db.String(100))
+    postal_code = db.Column(db.String(30))
+    country = db.Column(db.String(100))
+    is_default = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+
+
+class LoginHistory(db.Model):
+    __tablename__ = 'login_history'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    success = db.Column(db.Boolean, default=True)
+    ip_address = db.Column(db.String(64))
+    user_agent = db.Column(db.String(512))
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow, index=True)
+
+
+class UserSession(db.Model):
+    __tablename__ = 'user_sessions'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    token_jti = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    ip_address = db.Column(db.String(64))
+    user_agent = db.Column(db.String(512))
+    revoked_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+
+
+class PermissionOverride(db.Model):
+    __tablename__ = 'permission_overrides'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    permission_key = db.Column(db.String(100), nullable=False)
+    allowed = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+
+
+class StockTransfer(db.Model):
+    __tablename__ = 'stock_transfers'
+    id = db.Column(db.Integer, primary_key=True)
+    transfer_number = db.Column(db.String(40), unique=True, nullable=False)
+    from_branch_id = db.Column(db.String(36), db.ForeignKey('branches.id'), nullable=False)
+    to_branch_id = db.Column(db.String(36), db.ForeignKey('branches.id'), nullable=False)
+    status = db.Column(db.String(20), default='draft')  # draft | in_transit | received | cancelled
+    notes = db.Column(db.Text)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    received_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    items = db.relationship('StockTransferItem', backref='transfer', lazy=True, cascade='all, delete-orphan')
+
+
+class StockTransferItem(db.Model):
+    __tablename__ = 'stock_transfer_items'
+    id = db.Column(db.Integer, primary_key=True)
+    transfer_id = db.Column(db.Integer, db.ForeignKey('stock_transfers.id', ondelete='CASCADE'), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
+    sku_id = db.Column(db.Integer, db.ForeignKey('product_skus.id'), nullable=True)
+    quantity = db.Column(db.Integer, nullable=False, default=0)
+
+
+class CycleCount(db.Model):
+    __tablename__ = 'cycle_counts'
+    id = db.Column(db.Integer, primary_key=True)
+    branch_id = db.Column(db.String(36), db.ForeignKey('branches.id'), nullable=False, index=True)
+    name = db.Column(db.String(255), nullable=False)
+    status = db.Column(db.String(20), default='open')  # open | completed | cancelled
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    items = db.relationship('CycleCountItem', backref='cycle_count', lazy=True, cascade='all, delete-orphan')
+
+
+class CycleCountItem(db.Model):
+    __tablename__ = 'cycle_count_items'
+    id = db.Column(db.Integer, primary_key=True)
+    cycle_count_id = db.Column(db.Integer, db.ForeignKey('cycle_counts.id', ondelete='CASCADE'), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
+    sku_id = db.Column(db.Integer, db.ForeignKey('product_skus.id'), nullable=True)
+    expected_qty = db.Column(db.Integer, default=0)
+    counted_qty = db.Column(db.Integer, nullable=True)
+    variance = db.Column(db.Integer, nullable=True)
+
+
+class IntegrationSetting(db.Model):
+    __tablename__ = 'integration_settings'
+    id = db.Column(db.Integer, primary_key=True)
+    provider = db.Column(db.String(50), nullable=False, unique=True)  # email | sms | whatsapp | custom
+    config = db.Column(db.JSON, default=dict)
+    enabled = db.Column(db.Boolean, default=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)

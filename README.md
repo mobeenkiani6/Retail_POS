@@ -29,8 +29,8 @@ retail store pos main/
 │   ├── app/          # Models, routes, services
 │   ├── run.py
 │   └── start-backend.ps1
-├── frontend/         # React SPA (port 5173)
-│   └── src/
+├── frontend/         # POS React SPA (port 5173)
+├── admin/            # Admin Panel React SPA (port 5174)
 ├── docker-compose.yml
 └── README.md
 ```
@@ -72,6 +72,16 @@ npm run dev
 
 App: **http://localhost:5173** (API proxied to backend)
 
+### 4. Admin Panel
+
+```powershell
+cd admin
+npm install
+npm run dev
+```
+
+Admin: **http://localhost:5174** — owner / admin / manager login. Shares the same Flask API and PostgreSQL. Use **Branches** to provision hex IDs for POS `BRANCH_ID` / `VITE_BRANCH_ID`.
+
 ### Default login
 
 Use the credentials created during first-time setup, or run the setup flow at `/setup` if the database is fresh.
@@ -101,6 +111,8 @@ Each POS install is **single-branch scoped**. Set the same 32-character hex id o
 
 | Command | Location | Description |
 |---------|----------|-------------|
+| `npm run dev` | `admin/` | Admin Panel (port 5174) |
+| `npm run build` | `admin/` | Production build of Admin Panel |
 | `.\start-backend.ps1` | `backend/` | Start API with venv (kills stale port 5001) |
 | `npm run dev` | `frontend/` | Dev server with hot reload |
 | `npm run build` | `frontend/` | Production build |

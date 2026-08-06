@@ -215,7 +215,7 @@ def get_supplier(current_user, supplier_id):
 
 @suppliers_bp.route('/', methods=['POST'])
 @token_required
-@role_required('owner', 'manager', 'inventory_manager')
+@role_required('owner', 'admin', 'manager', 'inventory_manager')
 def create_supplier(current_user):
     data = request.get_json() or {}
     name = (data.get('name') or data.get('company_name') or '').strip()
@@ -255,7 +255,7 @@ def create_supplier(current_user):
 
 @suppliers_bp.route('/<int:supplier_id>', methods=['PUT'])
 @token_required
-@role_required('owner', 'manager', 'inventory_manager')
+@role_required('owner', 'admin', 'manager', 'inventory_manager')
 def update_supplier(current_user, supplier_id):
     supplier = Supplier.query.get_or_404(supplier_id)
     data = request.get_json() or {}
@@ -430,18 +430,18 @@ def record_supplier_return(current_user, supplier_id):
 
 @suppliers_bp.route('/<int:supplier_id>/archive', methods=['PATCH'])
 @token_required
-@role_required('owner', 'manager')
+@role_required('owner', 'admin', 'manager')
 def archive_supplier(current_user, supplier_id):
     supplier = Supplier.query.get_or_404(supplier_id)
     supplier.archived_at = datetime.utcnow()
     supplier.status = 'inactive'
     db.session.commit()
-    return jsonify({'message': 'Supplier archived', 'supplier': _supplier_dict(supplier)}), 200
+    return jsonify({'message': 'Supplier deleted', 'supplier': _supplier_dict(supplier)}), 200
 
 
 @suppliers_bp.route('/<int:supplier_id>/restore', methods=['PATCH'])
 @token_required
-@role_required('owner', 'manager')
+@role_required('owner', 'admin', 'manager')
 def restore_supplier(current_user, supplier_id):
     supplier = Supplier.query.get_or_404(supplier_id)
     supplier.archived_at = None
@@ -452,13 +452,17 @@ def restore_supplier(current_user, supplier_id):
 
 @suppliers_bp.route('/<int:supplier_id>', methods=['DELETE'])
 @token_required
-@role_required('owner')
+@role_required('owner', 'admin', 'manager')
 def delete_supplier(current_user, supplier_id):
+    """Hard delete when unused; otherwise soft-archive so the list stays clean."""
     supplier = Supplier.query.get_or_404(supplier_id)
-    if GoodsReceivedNote.query.filter_by(supplier_id=supplier.id).count() > 0:
-        return error_response('Conflict', 'Supplier has GRNs. Archive instead.', 409)
-    if SupplierLedgerEntry.query.filter_by(supplier_id=supplier.id).count() > 0:
-        return error_response('Conflict', 'Supplier has ledger entries. Archive instead.', 409)
+    has_grn = GoodsReceivedNote.query.filter_by(supplier_id=supplier.id).count() > 0
+    has_ledger = SupplierLedgerEntry.query.filter_by(supplier_id=supplier.id).count() > 0
+    if has_grn or has_ledger:
+        supplier.archived_at = datetime.utcnow()
+        supplier.status = 'inactive'
+        db.session.commit()
+        return jsonify({'message': 'Supplier deleted'}), 200
     db.session.delete(supplier)
     db.session.commit()
     return jsonify({'message': 'Supplier deleted'}), 200

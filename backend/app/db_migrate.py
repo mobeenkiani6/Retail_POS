@@ -209,6 +209,137 @@ MIGRATIONS = [
     )""",
     "CREATE INDEX IF NOT EXISTS ix_supplier_ledger_supplier_id ON supplier_ledger_entries (supplier_id)",
     "CREATE INDEX IF NOT EXISTS ix_supplier_ledger_created_at ON supplier_ledger_entries (created_at)",
+    # --- Admin panel extensions ---
+    """CREATE TABLE IF NOT EXISTS expense_categories (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(120) NOT NULL UNIQUE,
+        description TEXT,
+        active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )""",
+    """CREATE TABLE IF NOT EXISTS expenses (
+        id SERIAL PRIMARY KEY,
+        branch_id VARCHAR(36) REFERENCES branches(id),
+        category_id INTEGER REFERENCES expense_categories(id),
+        title VARCHAR(255) NOT NULL,
+        amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+        payment_method VARCHAR(50),
+        expense_date TIMESTAMPTZ DEFAULT NOW(),
+        notes TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        archived_at TIMESTAMPTZ
+    )""",
+    """CREATE TABLE IF NOT EXISTS loyalty_transactions (
+        id SERIAL PRIMARY KEY,
+        customer_id INTEGER NOT NULL REFERENCES customers(id),
+        sale_id INTEGER REFERENCES sales(id),
+        points_delta INTEGER NOT NULL DEFAULT 0,
+        balance_after INTEGER NOT NULL DEFAULT 0,
+        reason VARCHAR(100),
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )""",
+    """CREATE TABLE IF NOT EXISTS customer_notes (
+        id SERIAL PRIMARY KEY,
+        customer_id INTEGER NOT NULL REFERENCES customers(id),
+        body TEXT NOT NULL,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )""",
+    """CREATE TABLE IF NOT EXISTS customer_addresses (
+        id SERIAL PRIMARY KEY,
+        customer_id INTEGER NOT NULL REFERENCES customers(id),
+        label VARCHAR(50) DEFAULT 'home',
+        line1 VARCHAR(255) NOT NULL,
+        line2 VARCHAR(255),
+        city VARCHAR(100),
+        state VARCHAR(100),
+        postal_code VARCHAR(30),
+        country VARCHAR(100),
+        is_default BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )""",
+    """CREATE TABLE IF NOT EXISTS login_history (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        success BOOLEAN DEFAULT TRUE,
+        ip_address VARCHAR(64),
+        user_agent VARCHAR(512),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )""",
+    """CREATE TABLE IF NOT EXISTS user_sessions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        token_jti VARCHAR(64) NOT NULL UNIQUE,
+        ip_address VARCHAR(64),
+        user_agent VARCHAR(512),
+        revoked_at TIMESTAMPTZ,
+        expires_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )""",
+    """CREATE TABLE IF NOT EXISTS permission_overrides (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        permission_key VARCHAR(100) NOT NULL,
+        allowed BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )""",
+    """CREATE TABLE IF NOT EXISTS stock_transfers (
+        id SERIAL PRIMARY KEY,
+        transfer_number VARCHAR(40) NOT NULL UNIQUE,
+        from_branch_id VARCHAR(36) NOT NULL REFERENCES branches(id),
+        to_branch_id VARCHAR(36) NOT NULL REFERENCES branches(id),
+        status VARCHAR(20) DEFAULT 'draft',
+        notes TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        received_at TIMESTAMPTZ
+    )""",
+    "ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS received_at TIMESTAMPTZ",
+    "ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS notes TEXT",
+    "ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS created_by INTEGER",
+    "ALTER TABLE cycle_counts ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ",
+    """CREATE TABLE IF NOT EXISTS stock_transfer_items (
+        id SERIAL PRIMARY KEY,
+        transfer_id INTEGER NOT NULL REFERENCES stock_transfers(id) ON DELETE CASCADE,
+        product_id INTEGER NOT NULL REFERENCES products(id),
+        sku_id INTEGER REFERENCES product_skus(id),
+        quantity INTEGER NOT NULL DEFAULT 0
+    )""",
+    """CREATE TABLE IF NOT EXISTS cycle_counts (
+        id SERIAL PRIMARY KEY,
+        branch_id VARCHAR(36) NOT NULL REFERENCES branches(id),
+        name VARCHAR(255) NOT NULL,
+        status VARCHAR(20) DEFAULT 'open',
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        completed_at TIMESTAMPTZ
+    )""",
+    """CREATE TABLE IF NOT EXISTS cycle_count_items (
+        id SERIAL PRIMARY KEY,
+        cycle_count_id INTEGER NOT NULL REFERENCES cycle_counts(id) ON DELETE CASCADE,
+        product_id INTEGER NOT NULL REFERENCES products(id),
+        sku_id INTEGER REFERENCES product_skus(id),
+        expected_qty INTEGER DEFAULT 0,
+        counted_qty INTEGER,
+        variance INTEGER
+    )""",
+    """CREATE TABLE IF NOT EXISTS integration_settings (
+        id SERIAL PRIMARY KEY,
+        provider VARCHAR(50) NOT NULL UNIQUE,
+        config JSONB DEFAULT '{}',
+        enabled BOOLEAN DEFAULT FALSE,
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )""",
+    "ALTER TABLE coupons ADD COLUMN IF NOT EXISTS usage_limit INTEGER",
+    "ALTER TABLE coupons ADD COLUMN IF NOT EXISTS usage_count INTEGER DEFAULT 0",
+    "ALTER TABLE coupons ADD COLUMN IF NOT EXISTS min_order_amount NUMERIC(12,2) DEFAULT 0",
+    "ALTER TABLE coupons ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()",
+    "ALTER TABLE gift_cards ADD COLUMN IF NOT EXISTS initial_balance NUMERIC(12,2)",
+    "ALTER TABLE gift_cards ADD COLUMN IF NOT EXISTS customer_id INTEGER",
+    "ALTER TABLE gift_cards ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ",
 ]
 
 

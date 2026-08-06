@@ -55,3 +55,27 @@ def role_required(*roles):
             return f(current_user, *args, **kwargs)
         return decorated
     return decorator
+
+
+# Roles allowed into the Admin Panel HQ
+ADMIN_ROLES = ('owner', 'admin', 'manager')
+
+
+def admin_access(f):
+    """Require owner, admin, or manager — used by /api/v1/admin/*."""
+    @wraps(f)
+    def decorated(current_user, *args, **kwargs):
+        if current_user.role not in ADMIN_ROLES:
+            return jsonify({'message': 'Admin panel access required'}), 403
+        return f(current_user, *args, **kwargs)
+    return decorated
+
+
+def admin_owner_required(f):
+    """Owner or admin role for destructive / security operations."""
+    @wraps(f)
+    def decorated(current_user, *args, **kwargs):
+        if current_user.role not in ('owner', 'admin'):
+            return jsonify({'message': 'Owner or admin privileges required'}), 403
+        return f(current_user, *args, **kwargs)
+    return decorated

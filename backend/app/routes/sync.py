@@ -4,9 +4,10 @@ from app.models import db, SyncOutbox, Sale
 from app.utils.auth_decorators import token_required, role_required
 from app.services.sync_service import (
     get_pending_events,
+    get_retriable_failed,
     process_push_batch,
     push_pending_to_cloud,
-    mark_synced,
+    requeue_failed,
 )
 from app.errors import error_response
 from app.branch_scope import resolve_branch_id
@@ -56,18 +57,34 @@ def sync_outbox_status(current_user):
     failed = SyncOutbox.query.filter_by(status='failed').count()
     synced = SyncOutbox.query.filter_by(status='synced').count()
     events = get_pending_events(limit=20)
+    failed_events = get_retriable_failed(limit=10)
     return jsonify({
         'pending': pending,
         'failed': failed,
         'synced': synced,
+        'auto_sync': True,
         'recent_pending': [
             {
                 'id': e.id,
                 'event_type': e.event_type,
                 'invoice_uuid': e.invoice_uuid,
+                'status': e.status,
+                'attempts': e.attempts or 0,
                 'created_at': e.created_at.isoformat() if e.created_at else None,
             }
             for e in events
+        ],
+        'recent_failed': [
+            {
+                'id': e.id,
+                'event_type': e.event_type,
+                'invoice_uuid': e.invoice_uuid,
+                'status': e.status,
+                'attempts': e.attempts or 0,
+                'last_error': e.last_error,
+                'created_at': e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in failed_events
         ],
     }), 200
 
@@ -76,5 +93,11 @@ def sync_outbox_status(current_user):
 @token_required
 @role_required('owner', 'manager')
 def sync_flush(current_user):
+    """Manual flush: requeue failed + drain pending (also runs automatically)."""
+    requeued = requeue_failed()
     count = push_pending_to_cloud()
-    return jsonify({'synced_count': count, 'message': f'Synced {count} events'}), 200
+    return jsonify({
+        'synced_count': count,
+        'requeued': requeued,
+        'message': f'Synced {count} events' + (f' (requeued {requeued} failed)' if requeued else ''),
+    }), 200

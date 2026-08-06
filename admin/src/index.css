@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-accent-50: #eff6ff;
+  --color-accent-100: #dbeafe;
+  --color-accent-200: #bfdbfe;
+  --color-accent-300: #93c5fd;
+  --color-accent-400: #60a5fa;
+  --color-accent-500: #3b82f6;
+  --color-accent-600: #2563eb;
+  --color-accent-700: #1d4ed8;
+  --color-accent-800: #1e40af;
+  --color-accent-900: #1e3a8a;
+
+  --color-neutral-950: #09090b;
+  --color-neutral-900: #18181b;
+  --color-neutral-800: #27272a;
+  --color-neutral-700: #3f3f46;
+  --color-neutral-600: #52525b;
+  --color-neutral-500: #71717a;
+  --color-neutral-400: #a1a1aa;
+  --color-neutral-300: #d4d4d8;
+  --color-neutral-200: #e4e4e7;
+  --color-neutral-100: #f4f4f5;
+  --color-neutral-50: #fafafa;
+
+  --color-success: #10b981;
+  --color-success-soft: #d1fae5;
+  --color-warning: #f59e0b;
+  --color-warning-soft: #fef3c7;
+  --color-danger: #ef4444;
+  --color-danger-soft: #fee2e2;
+  --color-info: #3b82f6;
+  --color-info-soft: #dbeafe;
+
+  --color-surface: #ffffff;
+  --color-surface-elevated: #ffffff;
+  --color-canvas: #f4f4f5;
+  --color-canvas-subtle: #fafafa;
+  --color-border: #e4e4e7;
+  --color-muted: #71717a;
+  --color-foreground: #18181b;
+  --color-foreground-secondary: #52525b;
+
+  --font-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.5rem;
+  --shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    @apply bg-canvas text-foreground font-sans antialiased;
+  }
+  .dark {
+    --color-canvas: #09090b;
+    --color-canvas-subtle: #0f0f12;
+    --color-surface: #18181b;
+    --color-surface-elevated: #1f1f23;
+    --color-border: #27272a;
+    --color-muted: #a1a1aa;
+    --color-foreground: #fafafa;
+    --color-foreground-secondary: #a1a1aa;
+    --color-success-soft: rgba(16, 185, 129, 0.15);
+    --color-warning-soft: rgba(245, 158, 11, 0.15);
+    --color-danger-soft: rgba(239, 68, 68, 0.15);
+    color-scheme: dark;
+  }
+}
+
+@layer utilities {
+  .page-title {
+    @apply text-2xl font-bold tracking-tight text-foreground;
+  }
+  .section-label {
+    @apply text-xs font-semibold uppercase tracking-wider text-muted;
+  }
+  .panel {
+    @apply bg-surface border border-border rounded-xl shadow-soft;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-accent-600 px-4 py-2 text-sm font-semibold text-white hover:bg-accent-700 transition-colors;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-foreground-secondary hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors;
+  }
+  .input {
+    @apply w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-accent-500/30 focus:border-accent-500;
+  }
+  .skeleton {
+    @apply animate-pulse rounded-xl bg-neutral-200 dark:bg-neutral-800;
+  }
+}

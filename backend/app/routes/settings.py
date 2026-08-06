@@ -72,6 +72,11 @@ def update_settings(current_user):
             setting.config = data['config']
             
         db.session.commit()
+        try:
+            from app.services import event_bus
+            event_bus.settings_updated(branch_id)
+        except Exception:
+            pass
         return jsonify({"message": "Settings updated", "config": setting.config}), 200
     except Exception as e:
         db.session.rollback()

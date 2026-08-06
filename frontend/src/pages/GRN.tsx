@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Plus, CheckCircle, PackageCheck, Copy, Trash2, Edit2, Printer, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, CheckCircle, PackageCheck, Copy, Trash2, Edit2, Printer, ChevronDown, ChevronRight, Eye } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import Button from '../components/ui/Button';
 import StatusBadge from '../components/ui/StatusBadge';
@@ -157,6 +157,7 @@ export default function GRNPage() {
   const [partialGrn, setPartialGrn] = useState<GRN | null>(null);
   const [partialQty, setPartialQty] = useState<Record<number, string>>({});
   const [receiving, setReceiving] = useState(false);
+  const [viewingGrn, setViewingGrn] = useState<GRN | null>(null);
 
   const {
     modalOpen,
@@ -538,6 +539,18 @@ export default function GRNPage() {
     }
   };
 
+  const viewingItems = viewingGrn?.items || [];
+  const viewingOrdered = viewingGrn
+    ? (viewingGrn.ordered_quantity ?? viewingItems.reduce((s, i) => s + (i.quantity || 0), 0))
+    : 0;
+  const viewingReceived = viewingGrn
+    ? (viewingGrn.received_quantity ?? viewingItems.reduce((s, i) => s + (i.received_quantity || 0), 0))
+    : 0;
+  const viewingTotalCost = viewingItems.reduce(
+    (s, i) => s + (Number(i.quantity) || 0) * (Number(i.cost_price) || 0),
+    0,
+  );
+
   return (
     <div className="flex-1 overflow-auto p-6 lg:p-8">
       <PageHeader
@@ -589,10 +602,20 @@ export default function GRNPage() {
               <div key={g.id} className="surface-card p-5 flex flex-col gap-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <h4 className="font-semibold text-foreground truncate">{g.grn_number}</h4>
+                    <button
+                      type="button"
+                      onClick={() => setViewingGrn(g)}
+                      className="font-semibold text-foreground truncate text-left hover:text-accent-600 transition-colors"
+                      title="View order details"
+                    >
+                      {g.grn_number}
+                    </button>
                     <p className="text-xs text-muted font-mono">{g.supplier_name || 'No supplier'}</p>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
+                    <button type="button" onClick={() => setViewingGrn(g)} className="p-1.5 rounded-lg hover:bg-canvas-subtle text-muted" title="View">
+                      <Eye className="w-3.5 h-3.5" />
+                    </button>
                     {g.status === 'draft' && (
                       <button type="button" onClick={() => openEdit(g)} className="p-1.5 rounded-lg hover:bg-canvas-subtle text-muted" title="Edit">
                         <Edit2 className="w-3.5 h-3.5" />
@@ -642,6 +665,9 @@ export default function GRNPage() {
                     </>
                   )}
                   <div className="flex gap-2">
+                    <Button variant="secondary" className="flex-1" onClick={() => setViewingGrn(g)}>
+                      <Eye className="w-4 h-4" /> View
+                    </Button>
                     <Button variant="secondary" className="flex-1" onClick={() => duplicateGrn(g.id)}>
                       <Copy className="w-4 h-4" /> Duplicate
                     </Button>
@@ -655,6 +681,121 @@ export default function GRNPage() {
           })}
         </div>
       )}
+
+      {/* View purchase order details */}
+      <Modal
+        open={!!viewingGrn}
+        onClose={() => setViewingGrn(null)}
+        title={viewingGrn ? viewingGrn.grn_number : 'Purchase order'}
+        size="lg"
+        footer={
+          viewingGrn ? (
+            <>
+              <Button variant="secondary" onClick={() => setViewingGrn(null)}>Close</Button>
+              <Button variant="secondary" onClick={() => printGrn(viewingGrn)}>
+                <Printer className="w-4 h-4" /> Print
+              </Button>
+              {viewingGrn.status === 'draft' && (
+                <Button onClick={() => { setViewingGrn(null); openEdit(viewingGrn); }}>
+                  <Edit2 className="w-4 h-4" /> Edit
+                </Button>
+              )}
+            </>
+          ) : null
+        }
+      >
+        {viewingGrn && (
+            <div className="space-y-4">
+              <div className="grid sm:grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-xs text-muted mb-0.5">Supplier</p>
+                  <p className="font-medium text-foreground">{viewingGrn.supplier_name || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted mb-0.5">Status</p>
+                  <StatusBadge status={viewingGrn.status} />
+                </div>
+                <div>
+                  <p className="text-xs text-muted mb-0.5">Created</p>
+                  <p className="text-foreground">
+                    {viewingGrn.created_at ? new Date(viewingGrn.created_at).toLocaleString() : '—'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted mb-0.5">Progress</p>
+                  <p className="text-foreground font-medium">{viewingReceived}/{viewingOrdered} received</p>
+                </div>
+              </div>
+              {viewingGrn.notes ? (
+                <div className="rounded-xl border border-border bg-canvas-subtle px-3 py-2">
+                  <p className="text-xs text-muted mb-0.5">Notes</p>
+                  <p className="text-sm text-foreground whitespace-pre-wrap">{viewingGrn.notes}</p>
+                </div>
+              ) : null}
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-semibold">Products</h4>
+                  <span className="text-xs text-muted">{viewingItems.length} line{viewingItems.length !== 1 ? 's' : ''}</span>
+                </div>
+                {viewingItems.length === 0 ? (
+                  <p className="text-sm text-muted text-center py-8 rounded-xl border border-dashed border-border">
+                    No products on this order.
+                  </p>
+                ) : (
+                  <div className="space-y-2 max-h-[50vh] overflow-auto">
+                    {viewingItems.map((item, idx) => {
+                      const name =
+                        item.product_name
+                        || products.find(p => p.id === item.product_id)?.name
+                        || `Product #${item.product_id}`;
+                      const qty = Number(item.quantity) || 0;
+                      const recv = Number(item.received_quantity) || 0;
+                      const rem = item.remaining_quantity ?? Math.max(0, qty - recv);
+                      const lineCost = qty * (Number(item.cost_price) || 0);
+                      const unit = item.receive_unit || 'unit';
+                      return (
+                        <div
+                          key={item.id ?? `${item.product_id}-${idx}`}
+                          className="px-3 py-3 rounded-xl border border-border bg-surface"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-foreground truncate">
+                                {name}
+                                {item.sku_label ? ` — ${item.sku_label}` : ''}
+                              </p>
+                              <p className="text-xs text-muted mt-0.5">
+                                Ordered {qty} {unit}
+                                {' · '}Received {recv}
+                                {rem > 0 ? ` · Remaining ${rem}` : ''}
+                              </p>
+                            </div>
+                            <p className="text-sm font-medium text-foreground shrink-0 tabular-nums">
+                              {formatCurrency(lineCost)}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-muted">
+                            <span>Cost: <span className="text-foreground">{formatCurrency(Number(item.cost_price) || 0)}</span></span>
+                            <span>Sell: <span className="text-foreground">{formatCurrency(Number(item.sell_price) || 0)}</span></span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-between items-center pt-3 border-t border-border text-sm">
+                <span className="text-muted">{viewingItems.length} product line{viewingItems.length !== 1 ? 's' : ''}</span>
+                <span className="text-muted">
+                  Order total:{' '}
+                  <span className="font-semibold text-foreground">{formatCurrency(viewingTotalCost)}</span>
+                </span>
+              </div>
+            </div>
+        )}
+      </Modal>
 
       {/* Partial receive modal */}
       <Modal
