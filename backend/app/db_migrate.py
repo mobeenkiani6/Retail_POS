@@ -135,6 +135,12 @@ MIGRATIONS = [
        WHERE gi.grn_id = g.id
          AND g.status = 'received'
          AND COALESCE(gi.received_quantity, 0) = 0""",
+    # --- Expiry tracking ---
+    "ALTER TABLE categories ADD COLUMN IF NOT EXISTS expiry_warning_days INTEGER",
+    "ALTER TABLE products ADD COLUMN IF NOT EXISTS shelf_life_days INTEGER",
+    "ALTER TABLE products ADD COLUMN IF NOT EXISTS expiry_warning_days INTEGER",
+    "ALTER TABLE product_batches ADD COLUMN IF NOT EXISTS sku_id INTEGER REFERENCES product_skus(id)",
+    "CREATE INDEX IF NOT EXISTS ix_product_batches_expiry ON product_batches (branch_id, expiry_date) WHERE quantity > 0 AND expiry_date IS NOT NULL",
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS carton_qty NUMERIC(12,3) DEFAULT 0",
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS carton_unit VARCHAR(20)",
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS packet_qty NUMERIC(12,3) DEFAULT 0",

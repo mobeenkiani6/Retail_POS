@@ -1,5 +1,5 @@
 import { Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 
 /** Shared search field — consistent height/alignment across admin tables */
 export function TableSearch({
@@ -114,4 +114,23 @@ export function fullLabel(abbr: string): string {
     GRN: 'Goods Received Note (GRN)',
   };
   return map[abbr] || abbr;
+}
+
+/** Horizontal scroll wrapper for wide data tables on small screens */
+export function ScrollTable({
+  children,
+  className = '',
+  minWidth = '640px',
+}: {
+  children: ReactNode;
+  className?: string;
+  minWidth?: string;
+}) {
+  return (
+    <div className={`table-scroll ${className}`}>
+      <div style={{ minWidth }} className="w-full">
+        {children}
+      </div>
+    </div>
+  );
 }

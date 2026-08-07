@@ -97,18 +97,11 @@ def dashboard_overview(current_user):
         if level > 0 and prod.id not in sold_product_ids:
             dead_stock += 1
 
-    # Expiring batches (30 days)
+    # Expiring / expired lots using product/category warning windows
     expiring = 0
     try:
-        expiry_limit = (now + timedelta(days=30)).date()
-        batch_q = ProductBatch.query.filter(
-            ProductBatch.expiry_date != None,
-            ProductBatch.expiry_date <= expiry_limit,
-            ProductBatch.quantity > 0,
-        )
-        if branch_id:
-            batch_q = batch_q.filter(ProductBatch.branch_id == branch_id)
-        expiring = batch_q.count()
+        from app.services.expiry_service import list_expiry_alerts
+        expiring = len(list_expiry_alerts(branch_id=branch_id))
     except Exception:
         expiring = 0
 

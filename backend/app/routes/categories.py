@@ -17,6 +17,7 @@ def _cat_dict(c):
         'sort_order': getattr(c, 'sort_order', 0) or 0,
         'icon': getattr(c, 'icon', None) or '',
         'image_url': getattr(c, 'image_url', None) or '',
+        'expiry_warning_days': getattr(c, 'expiry_warning_days', None),
         'product_count': Product.query.filter_by(category_id=c.id, archived_at=None).count(),
         'created_at': c.created_at.isoformat() if c.created_at else None,
         'archived_at': c.archived_at.isoformat() if c.archived_at else None,
@@ -62,6 +63,7 @@ def create_category(current_user):
         sort_order=int(data.get('sort_order', 0) or 0),
         icon=data.get('icon'),
         image_url=data.get('image_url'),
+        expiry_warning_days=int(data['expiry_warning_days']) if data.get('expiry_warning_days') not in (None, '') else None,
     )
     db.session.add(cat)
     db.session.commit()
@@ -85,6 +87,9 @@ def update_category(current_user, cat_id):
             setattr(cat, field, data[field])
     if 'sort_order' in data:
         cat.sort_order = int(data['sort_order'] or 0)
+    if 'expiry_warning_days' in data:
+        val = data.get('expiry_warning_days')
+        cat.expiry_warning_days = int(val) if val not in (None, '') else None
     db.session.commit()
     return jsonify({'category': _cat_dict(cat)}), 200
 

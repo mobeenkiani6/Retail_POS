@@ -17,6 +17,7 @@ type Category = {
   parent_name?: string;
   product_count?: number;
   archived_at?: string;
+  expiry_warning_days?: number | null;
 };
 
 export default function CategoriesSettings() {
@@ -24,7 +25,7 @@ export default function CategoriesSettings() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Category | null>(null);
-  const [form, setForm] = useState({ name: '', description: '', parent_id: '' });
+  const [form, setForm] = useState({ name: '', description: '', parent_id: '', expiry_warning_days: '' });
 
   const load = () => {
     setLoading(true);
@@ -37,7 +38,7 @@ export default function CategoriesSettings() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ name: '', description: '', parent_id: '' });
+    setForm({ name: '', description: '', parent_id: '', expiry_warning_days: '14' });
     setModalOpen(true);
   };
 
@@ -47,6 +48,7 @@ export default function CategoriesSettings() {
       name: c.name,
       description: c.description || '',
       parent_id: c.parent_id ? String(c.parent_id) : '',
+      expiry_warning_days: c.expiry_warning_days != null ? String(c.expiry_warning_days) : '',
     });
     setModalOpen(true);
   };
@@ -61,6 +63,9 @@ export default function CategoriesSettings() {
         name: form.name.trim(),
         description: form.description.trim() || null,
         parent_id: form.parent_id ? parseInt(form.parent_id, 10) : null,
+        expiry_warning_days: form.expiry_warning_days.trim() !== ''
+          ? parseInt(form.expiry_warning_days, 10)
+          : null,
       };
       if (editing) {
         await put(`/v1/categories/${editing.id}`, payload);
@@ -111,6 +116,11 @@ export default function CategoriesSettings() {
             </div>
           )},
           { key: 'product_count', header: 'Products', render: r => String(r.product_count ?? 0) },
+          { key: 'expiry_warning_days', header: 'Expiry warn', render: r => (
+            <span className="text-sm text-muted">
+              {r.expiry_warning_days != null ? `${r.expiry_warning_days}d` : '14d default'}
+            </span>
+          )},
           { key: 'status', header: 'Status', render: r => r.archived_at ? <Badge>Archived</Badge> : <Badge variant="success">Active</Badge> },
         ]}
         actions={r => {
@@ -144,6 +154,17 @@ export default function CategoriesSettings() {
               {parentOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
+          <Input
+            label="Expiry warning (days before)"
+            type="number"
+            min={0}
+            value={form.expiry_warning_days}
+            onChange={e => setForm(f => ({ ...f, expiry_warning_days: e.target.value }))}
+            placeholder="14 grocery · 2 fresh produce/meat"
+          />
+          <p className="text-xs text-muted -mt-2">
+            Alert when stock is within this many days of expiry. Leave blank to use the system default (14 days).
+          </p>
         </div>
       </Modal>
     </div>

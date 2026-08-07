@@ -1,10 +1,16 @@
-"""Goods Received Notes (GRN) — purchase receiving without batch tracking."""
+"""Goods Received Notes (GRN) — purchase receiving with lot / expiry tracking."""
 from datetime import datetime
 from decimal import Decimal
 from app.models import db, GoodsReceivedNote, GRNItem, Product, ProductSku
 from app.services.stock_service import restock, restock_sku
 from app.services.packaging_service import receive_quantity_to_stock, cost_per_sku_unit
 from app.services.notification_service import notify_sale_below_cost
+from app.services.expiry_service import (
+    parse_expiry_date,
+    create_or_update_batch_from_receive,
+    upsert_expiry_notifications,
+    suggest_expiry_from_shelf_life,
+)
 
 # UI categories ↔ DB statuses
 # active → draft | completed → received | partial → partial | deleted → deleted|cancelled
@@ -69,6 +75,15 @@ def create_grn(branch_id, supplier_id, items, user_id, notes=None):
             raise ValueError(f"Product {product_id} not found")
         cost = item.get('cost_price', sku.cost_price if sku else product.cost_price or 0)
         sell = item.get('sell_price', sku.selling_price if sku else product.base_price)
+        try:
+            expiry = parse_expiry_date(item.get('expiry_date'))
+        except ValueError as e:
+            raise ValueError(str(e))
+        if product.requires_expiry and not expiry:
+            # Auto-suggest from shelf life when possible
+            expiry = suggest_expiry_from_shelf_life(product)
+        if product.requires_expiry and not expiry:
+            raise ValueError(f'Expiry date is required for {product.name}')
         grn_item = GRNItem(
             grn_id=grn.id,
             product_id=product_id,
@@ -79,7 +94,7 @@ def create_grn(branch_id, supplier_id, items, user_id, notes=None):
             receive_unit=_normalize_receive_unit(item.get('receive_unit')),
             cost_price=cost,
             sell_price=sell,
-            expiry_date=item.get('expiry_date'),
+            expiry_date=expiry,
         )
         db.session.add(grn_item)
 
@@ -88,17 +103,27 @@ def create_grn(branch_id, supplier_id, items, user_id, notes=None):
 
 
 def _restock_line(grn, item, qty_this_receive, user_id, price_warnings):
-    """Restock inventory for qty_this_receive (in receive_unit) and update costs."""
+    """Restock inventory for qty_this_receive (in receive_unit), update costs, and record lot."""
     if qty_this_receive <= 0:
         return 0.0
 
     receive_unit = _normalize_receive_unit(getattr(item, 'receive_unit', None) or 'unit')
     line_cost = float(item.cost_price or 0) * qty_this_receive
+    product = Product.query.get(item.product_id)
+    if not product:
+        raise ValueError('GRN item product missing')
 
+    expiry = item.expiry_date
+    if isinstance(expiry, datetime):
+        expiry = expiry.date()
+    if product.requires_expiry and not expiry:
+        raise ValueError(f'Expiry date is required to receive {product.name}')
+
+    stock_qty = qty_this_receive
+    sku = None
     if item.sku_id:
         sku = ProductSku.query.get(item.sku_id)
-        product = Product.query.get(item.product_id)
-        if not sku or not product:
+        if not sku:
             raise ValueError('GRN item SKU/product missing')
         stock_qty = receive_quantity_to_stock(product, sku, qty_this_receive, receive_unit)
         restock_sku(
@@ -131,6 +156,8 @@ def _restock_line(grn, item, qty_this_receive, user_id, price_warnings):
                 'cost_price': float(cost),
                 'sell_price': float(sell),
             })
+        lot_cost = float(sku.cost_price or item.cost_price or 0)
+        lot_sell = float(sku.selling_price or item.sell_price or 0)
     else:
         restock(
             grn.branch_id,
@@ -142,8 +169,7 @@ def _restock_line(grn, item, qty_this_receive, user_id, price_warnings):
             user_id=user_id,
             notes=f'GRN {grn.grn_number}',
         )
-        product = Product.query.get(item.product_id)
-        if product and item.cost_price:
+        if item.cost_price:
             product.cost_price = item.cost_price
             sell = Decimal(str(product.base_price or 0))
             cost = Decimal(str(product.cost_price or 0))
@@ -159,6 +185,24 @@ def _restock_line(grn, item, qty_this_receive, user_id, price_warnings):
                     'cost_price': float(cost),
                     'sell_price': float(sell),
                 })
+        lot_cost = float(item.cost_price or product.cost_price or 0)
+        lot_sell = float(item.sell_price or product.base_price or 0)
+
+    # Always record a lot so expiry alerts work for all received stock
+    create_or_update_batch_from_receive(
+        branch_id=grn.branch_id,
+        product=product,
+        sku_id=item.sku_id,
+        quantity=stock_qty,
+        cost_price=lot_cost,
+        sell_price=lot_sell,
+        batch_number=getattr(item, 'batch_number', None),
+        expiry_date=expiry,
+        grn_id=grn.id,
+        grn_number=grn.grn_number,
+        grn_item_id=item.id,
+        user_id=user_id,
+    )
 
     return line_cost
 
@@ -254,6 +298,11 @@ def receive_grn(grn_id, user_id, items=None, mode='complete'):
             print(f'Warning: supplier ledger post failed for GRN {grn.id}: {e}')
 
     db.session.commit()
+    try:
+        upsert_expiry_notifications(grn.branch_id)
+        db.session.commit()
+    except Exception as e:
+        print(f'Warning: expiry notifications failed for GRN {grn.id}: {e}')
     grn._price_warnings = price_warnings
     return grn
 
@@ -296,6 +345,8 @@ def grn_to_dict(grn):
             'received_quantity': received,
             'remaining_quantity': remaining,
             'receive_unit': getattr(i, 'receive_unit', None) or 'unit',
+            'batch_number': getattr(i, 'batch_number', None) or 'N/A',
+            'expiry_date': i.expiry_date.isoformat() if getattr(i, 'expiry_date', None) else None,
             'cost_price': float(i.cost_price),
             'sell_price': float(i.sell_price),
         })

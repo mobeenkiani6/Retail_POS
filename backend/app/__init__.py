@@ -110,6 +110,7 @@ def create_app():
     from app.routes.variant_options import variant_options_bp
     from app.routes.batches import batches_bp
     from app.routes.inventory_health import inventory_health_bp
+    from app.routes.expiry import expiry_bp
     from app.routes.admin import admin_bp
 
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
@@ -135,6 +136,7 @@ def create_app():
     app.register_blueprint(variant_options_bp, url_prefix='/api/v1/variant-options')
     app.register_blueprint(batches_bp, url_prefix='/api/v1/batches')
     app.register_blueprint(inventory_health_bp, url_prefix='/api/v1/inventory-health')
+    app.register_blueprint(expiry_bp, url_prefix='/api/v1/expiry')
     app.register_blueprint(admin_bp, url_prefix='/api/v1/admin')
 
     # Register Socket.IO event handlers (avoid `import app.*` which rebinds local `app`)

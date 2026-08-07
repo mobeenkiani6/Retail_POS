@@ -1,26 +1,52 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useBranchFilter } from '../stores/branch';
 import { useProductsStore } from '../stores/products';
 import { TableSearch, SortableTh, useTableSort, fullLabel } from '../components/TableTools';
 import { useRefreshOnEvents } from '../hooks/useEvents';
+import { get } from '../api/client';
 
 function money(n?: number) {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'PKR', maximumFractionDigits: 0 }).format(n || 0);
 }
 
+type ExpiryAlert = {
+  batch_id: number;
+  name: string;
+  display_label?: string;
+  batch_number: string;
+  quantity: number;
+  expiry_date: string;
+  days_left: number;
+  warning_days: number;
+  status: string;
+};
+
 export function InventoryPage() {
   const { selectedBranchId } = useBranchFilter();
   const { inventoryRows: rows, inventorySummary: summary, loading, load, invalidate } = useProductsStore();
   const [q, setQ] = useState('');
+  const [expiryAlerts, setExpiryAlerts] = useState<ExpiryAlert[]>([]);
+
+  const loadExpiry = useCallback(async () => {
+    try {
+      const qs = selectedBranchId ? `?branch_id=${selectedBranchId}` : '';
+      const res = await get<{ alerts?: ExpiryAlert[] }>(`/v1/expiry/alerts${qs}`);
+      setExpiryAlerts(res.alerts || []);
+    } catch {
+      setExpiryAlerts([]);
+    }
+  }, [selectedBranchId]);
 
   useEffect(() => {
     invalidate();
     void load(true);
-  }, [selectedBranchId, load, invalidate]);
+    void loadExpiry();
+  }, [selectedBranchId, load, invalidate, loadExpiry]);
 
   useRefreshOnEvents(() => {
     invalidate();
     void load(true);
+    void loadExpiry();
   });
 
   const filtered = useMemo(() => {
@@ -60,12 +86,13 @@ export function InventoryPage() {
         <TableSearch value={q} onChange={setQ} placeholder="Search stock…" />
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
         {[
           [`Total ${fullLabel('SKUs')}`, filtered.length],
           ['Total units', units],
           ['Stock value', money(value)],
           ['Low / out', `${low} / ${out}`],
+          ['Expiring / expired', expiryAlerts.length],
         ].map(([label, val]) => (
           <div key={String(label)} className="panel p-4">
             <div className="section-label">{label as string}</div>
@@ -73,6 +100,38 @@ export function InventoryPage() {
           </div>
         ))}
       </div>
+
+      {expiryAlerts.length > 0 && (
+        <div className="panel p-4 space-y-3">
+          <div className="section-label">Expiry alerts</div>
+          <div className="space-y-2 max-h-64 overflow-auto">
+            {expiryAlerts.slice(0, 40).map((a) => {
+              const expired = a.status === 'expired';
+              return (
+                <div
+                  key={a.batch_id}
+                  className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2 text-sm ${
+                    expired ? 'border-danger/30 bg-danger/5' : 'border-warning/30 bg-warning/5'
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">
+                      {a.display_label ? `${a.name} — ${a.display_label}` : a.name}
+                    </div>
+                    <div className="text-xs text-muted">
+                      Batch {a.batch_number} · {a.quantity} units · {a.expiry_date}
+                      {expired ? ' · Expired' : ` · ${a.days_left}d left (warn ${a.warning_days}d)`}
+                    </div>
+                  </div>
+                  <span className={`text-[10px] uppercase font-semibold ${expired ? 'text-danger' : 'text-warning'}`}>
+                    {expired ? 'Expired' : `${a.days_left}d`}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {summary && (
         <div className="text-xs text-muted">

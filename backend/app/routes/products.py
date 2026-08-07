@@ -14,7 +14,8 @@ products_bp = Blueprint('products', __name__)
 
 PARENT_FIELDS = (
     'description', 'category_id', 'brand_id', 'supplier_id',
-    'image_url', 'tax_rate', 'requires_expiry', 'notes', 'status',
+    'image_url', 'tax_rate', 'requires_expiry', 'shelf_life_days', 'expiry_warning_days',
+    'notes', 'status',
     'sku', 'unit', 'unit_id', 'min_stock', 'reorder_qty',
     'carton_qty', 'carton_unit', 'packet_qty', 'packet_unit',
 )
@@ -67,6 +68,8 @@ def _product_to_dict(product, branch_id=None, include_skus=True):
         'image_url': product.image_url or '',
         'tax_rate': float(getattr(product, 'tax_rate', 0) or 0),
         'requires_expiry': product.requires_expiry,
+        'shelf_life_days': getattr(product, 'shelf_life_days', None),
+        'expiry_warning_days': getattr(product, 'expiry_warning_days', None),
         'notes': getattr(product, 'notes', None) or '',
         'status': 'archived' if product.archived_at else (getattr(product, 'status', None) or 'active'),
         'archived_at': product.archived_at.isoformat() if getattr(product, 'archived_at', None) else None,
@@ -133,6 +136,8 @@ def _parse_parent_payload(data, *, partial=False):
         'image_url': (data.get('image_url') or '').strip() or '',
         'tax_rate': tax_rate,
         'requires_expiry': bool(data.get('requires_expiry', False)),
+        'shelf_life_days': _int_or_none(data.get('shelf_life_days')),
+        'expiry_warning_days': _int_or_none(data.get('expiry_warning_days')),
         'notes': (data.get('notes') or '').strip() or None,
         'status': (data.get('status') or 'active').strip(),
     }

@@ -143,7 +143,7 @@ export function CatalogPage() {
                       skus.map((sku) => (
                         <tr key={`${p.id}-${sku.id}`} className="border-t border-border/60 bg-canvas-subtle/30">
                           <td colSpan={7} className="px-4 py-3">
-                            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 pl-8">
+                            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 pl-3 sm:pl-8">
                               <div>
                                 <div className="section-label">Variant</div>
                                 <div className="font-medium mt-0.5">{sku.variant_name || '—'}</div>
@@ -202,8 +202,8 @@ export function CatalogDetailPage({ id }: { id: string }) {
     <div className="space-y-4">
       <a href="/catalog" className="text-sm text-accent-600">← Catalog</a>
       <h1 className="page-title">{product.name}</h1>
-      <div className="panel overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="panel overflow-x-auto">
+        <table className="w-full text-sm min-w-[560px]">
           <thead className="bg-canvas-subtle text-left text-xs uppercase tracking-wider text-muted">
             <tr>
               <th className="px-4 py-3">Variant</th>

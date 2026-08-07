@@ -54,8 +54,8 @@ export function TransfersPage() {
         <div><label className="section-label">Qty</label><NumberFieldString className="input mt-1" value={qty} onValueChange={setQty} /></div>
         <button className="btn-primary" type="submit">Create draft</button>
       </form>
-      <div className="panel overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="panel overflow-x-auto">
+        <table className="w-full text-sm min-w-[560px]">
           <thead className="bg-canvas-subtle text-left text-xs uppercase tracking-wider text-muted">
             <tr><th className="px-4 py-3">Number</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Actions</th></tr>
           </thead>

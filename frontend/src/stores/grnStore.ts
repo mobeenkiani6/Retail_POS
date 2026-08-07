@@ -10,6 +10,8 @@ export type GrnSkuLine = {
   receive_unit: 'unit' | 'carton' | 'packet';
   cost_price: number;
   sell_price: number;
+  batch_number: string;
+  expiry_date: string;
 };
 
 export type GrnProductBlock = {

@@ -25,7 +25,7 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
+    <div className="min-h-screen flex items-center justify-center relative overflow-hidden px-4 py-8">
       <div
         className="absolute inset-0"
         style={{
@@ -39,7 +39,7 @@ export function LoginPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35 }}
         onSubmit={onSubmit}
-        className="relative panel w-full max-w-md p-8 space-y-5"
+        className="relative panel w-full max-w-md p-6 sm:p-8 space-y-5"
       >
         <div>
           <div className="text-2xl font-bold tracking-tight">Nycto Retail</div>

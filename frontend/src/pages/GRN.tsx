@@ -25,6 +25,8 @@ type GRNItem = {
   received_quantity?: number;
   remaining_quantity?: number;
   receive_unit?: 'unit' | 'carton' | 'packet';
+  batch_number?: string;
+  expiry_date?: string | null;
   cost_price: number;
   sell_price: number;
 };
@@ -75,12 +77,24 @@ type Product = {
   carton_qty?: number;
   packet_qty?: number;
   unit?: string;
+  requires_expiry?: boolean;
+  shelf_life_days?: number | null;
+  expiry_warning_days?: number | null;
   skus?: ProductSku[];
 };
 
 type Supplier = { id: number; name: string };
 
+function suggestedExpiry(product?: Product): string {
+  const days = product?.shelf_life_days;
+  if (!days || days <= 0) return '';
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 function skusFromProduct(p: Product): GrnSkuLine[] {
+  const expiry = p.requires_expiry ? suggestedExpiry(p) : '';
   return (p.skus || []).map(s => ({
     sku_id: s.id!,
     label: s.display_label || formatSkuLabel(s),
@@ -89,6 +103,8 @@ function skusFromProduct(p: Product): GrnSkuLine[] {
     receive_unit: 'unit' as const,
     cost_price: s.cost_price ?? 0,
     sell_price: s.selling_price ?? 0,
+    batch_number: '',
+    expiry_date: expiry,
   }));
 }
 
@@ -114,6 +130,8 @@ function blocksFromItems(items: GRNItem[], products: Product[]): GrnProductBlock
               receive_unit: match.receive_unit || 'unit',
               cost_price: match.cost_price,
               sell_price: match.sell_price,
+              batch_number: match.batch_number || '',
+              expiry_date: match.expiry_date || '',
             }
             : s;
         })
@@ -125,6 +143,8 @@ function blocksFromItems(items: GRNItem[], products: Product[]): GrnProductBlock
           receive_unit: (i.receive_unit || 'unit') as 'unit' | 'carton' | 'packet',
           cost_price: i.cost_price,
           sell_price: i.sell_price,
+          batch_number: i.batch_number || '',
+          expiry_date: i.expiry_date || '',
         }));
     return { product_id: productId, expanded: true, skus };
   });
@@ -142,6 +162,8 @@ function itemsFromBlocks(blocks: GrnProductBlock[]): GRNItem[] {
         receive_unit: sku.receive_unit || 'unit',
         cost_price: sku.cost_price,
         sell_price: sku.sell_price,
+        batch_number: sku.batch_number?.trim() || 'N/A',
+        expiry_date: sku.expiry_date?.trim() || null,
       });
     }
   }
@@ -279,6 +301,13 @@ export default function GRNPage() {
   const handleSave = async () => {
     const validItems = itemsFromBlocks(blocks);
     if (!validItems.length) { showToast('Select at least one variant to receive', 'error'); return; }
+    for (const item of validItems) {
+      const product = products.find(p => p.id === item.product_id);
+      if (product?.requires_expiry && !item.expiry_date) {
+        showToast(`Expiry date required for ${product.name}`, 'error');
+        return;
+      }
+    }
     try {
       const payload = {
         branch_id: branchId,
@@ -960,7 +989,7 @@ export default function GRNPage() {
                               </label>
 
                               {sku.selected && (
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 flex-1 sm:max-w-xl">
+                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 flex-1">
                                   <div>
                                     <label className="text-[10px] uppercase text-muted font-semibold mb-1 block">Qty</label>
                                     <input
@@ -1009,6 +1038,28 @@ export default function GRNPage() {
                                       step="0.01"
                                       value={sku.sell_price || ''}
                                       onChange={e => updateSkuField(block.product_id, sku.sku_id, 'sell_price', parseFloat(e.target.value) || 0)}
+                                      className="input-base w-full py-1.5 text-sm"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[10px] uppercase text-muted font-semibold mb-1 block">
+                                      Expiry{product?.requires_expiry ? ' *' : ''}
+                                    </label>
+                                    <input
+                                      type="date"
+                                      value={sku.expiry_date || ''}
+                                      onChange={e => updateSkuField(block.product_id, sku.sku_id, 'expiry_date', e.target.value)}
+                                      className="input-base w-full py-1.5 text-sm"
+                                      required={!!product?.requires_expiry}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[10px] uppercase text-muted font-semibold mb-1 block">Batch / lot #</label>
+                                    <input
+                                      type="text"
+                                      value={sku.batch_number || ''}
+                                      onChange={e => updateSkuField(block.product_id, sku.sku_id, 'batch_number', e.target.value)}
+                                      placeholder="Optional"
                                       className="input-base w-full py-1.5 text-sm"
                                     />
                                   </div>

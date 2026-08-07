@@ -30,7 +30,7 @@ export function BiPage() {
         <h1 className="page-title">Business Intelligence</h1>
         <p className="text-sm text-muted mt-1">Trends, affinity, and rule-based insights</p>
       </div>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {[
           ['Revenue', kpis.revenue],
           [fullLabel('AOV'), kpis.aov],

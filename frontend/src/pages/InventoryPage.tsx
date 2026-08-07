@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   Package, Loader2, History, AlertTriangle,
-  TrendingDown, DollarSign, Boxes, Pencil, Archive, Trash2,
+  TrendingDown, DollarSign, Boxes, Pencil, Archive, Trash2, CalendarClock,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import DataTable from '../components/ui/DataTable';
@@ -50,6 +50,20 @@ type Movement = {
 type StockAlert = {
   product_id: number; sku_id?: number; name: string; display_label?: string;
   barcode?: string; stock_level: number; min_stock: number; reorder_level?: number;
+};
+
+type ExpiryAlert = {
+  batch_id: number;
+  product_id: number;
+  sku_id?: number;
+  name: string;
+  display_label?: string;
+  batch_number: string;
+  quantity: number;
+  expiry_date: string;
+  days_left: number;
+  warning_days: number;
+  status: 'expired' | 'near_expiry' | string;
 };
 
 type Summary = {
@@ -252,20 +266,23 @@ export default function InventoryPage() {
   const { tab, search, stockModalSkuId, setTab, setSearch, setStockModal } = useInventoryStore();
   const [products, setProducts] = useState<Product[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [expiryAlerts, setExpiryAlerts] = useState<ExpiryAlert[]>([]);
   const [movements, setMovements] = useState<Movement[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [prodRes, , sumRes] = await Promise.all([
+      const [prodRes, , sumRes, expRes] = await Promise.all([
         get<{ products?: Product[] }>(`/products/?branch_id=${branchId}`),
         get(`/inventory/?branch_id=${branchId}`),
         get<Summary>(`/inventory/summary?branch_id=${branchId}`),
+        get<{ alerts?: ExpiryAlert[] }>(`/v1/expiry/alerts?branch_id=${branchId}`).catch(() => ({ alerts: [] })),
       ]);
       const prods = prodRes?.products ?? [];
       setProducts(prods);
       setSummary(sumRes);
+      setExpiryAlerts(expRes?.alerts ?? []);
     } catch (e) {
       showToast(getUserMessage(e), 'error');
     } finally {
@@ -442,7 +459,7 @@ export default function InventoryPage() {
     )},
   ];
 
-  const alertCount = (summary?.low_stock_count ?? 0) + (summary?.out_of_stock_count ?? 0);
+  const alertCount = (summary?.low_stock_count ?? 0) + (summary?.out_of_stock_count ?? 0) + expiryAlerts.length;
 
   const renderAlertCard = (alert: StockAlert, variant: 'warning' | 'danger') => {
     const isOut = variant === 'danger';
@@ -506,8 +523,14 @@ export default function InventoryPage() {
           >
             <StatCard
               label="Needs Restock"
-              value={String(alertCount)}
-              sub={alertCount > 0 ? `${summary.out_of_stock_count} out · ${summary.low_stock_count} low` : 'All stocked'}
+              value={String((summary?.low_stock_count ?? 0) + (summary?.out_of_stock_count ?? 0))}
+              sub={
+                expiryAlerts.length > 0
+                  ? `${expiryAlerts.length} expiring · ${(summary?.out_of_stock_count ?? 0)} out · ${(summary?.low_stock_count ?? 0)} low`
+                  : (summary && ((summary.out_of_stock_count + summary.low_stock_count) > 0)
+                    ? `${summary.out_of_stock_count} out · ${summary.low_stock_count} low`
+                    : 'All stocked')
+              }
               icon={TrendingDown}
             />
           </button>
@@ -581,13 +604,56 @@ export default function InventoryPage() {
             <EmptyState
               icon={AlertTriangle}
               title="All good"
-              description="No low stock or out-of-stock items. Set a min stock on products to get restock alerts."
+              description="No low stock, out-of-stock, or expiry alerts. Set min stock and expiry on receive to get restock/expiry warnings."
             />
           ) : (
             <>
               <p className="text-sm text-muted">
-                Items below minimum stock or sold out — adjust on hand or open Restock (GRN) to order more.
+                Low stock and lots nearing expiry — adjust on hand, restock via GRN, or sell through before the date.
               </p>
+
+              {expiryAlerts.length > 0 && (
+                <section className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <CalendarClock className="w-4 h-4 text-warning" />
+                    <h3 className="text-sm font-semibold">Expiry alerts</h3>
+                    <Badge variant="warning">{expiryAlerts.length}</Badge>
+                  </div>
+                  {expiryAlerts.map(a => {
+                    const isExpired = a.status === 'expired';
+                    return (
+                      <motion.div
+                        key={a.batch_id}
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border ${
+                          isExpired ? 'border-danger/30 bg-danger-soft' : 'border-warning/30 bg-warning-soft'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <p className="font-medium text-sm truncate">
+                            {a.display_label ? `${a.name} — ${a.display_label}` : a.name}
+                          </p>
+                          <p className="text-xs text-muted mt-0.5">
+                            Batch {a.batch_number} · {a.quantity} units · Expires {a.expiry_date}
+                            {isExpired
+                              ? ' · Expired'
+                              : ` · ${a.days_left} day${a.days_left !== 1 ? 's' : ''} left (warn at ${a.warning_days}d)`}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Badge variant={isExpired ? 'danger' : 'warning'}>
+                            {isExpired ? 'Expired' : `${a.days_left}d left`}
+                          </Badge>
+                          <Link to="/grn">
+                            <Button type="button" size="sm">Restock</Button>
+                          </Link>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </section>
+              )}
 
               {summary.out_of_stock.length > 0 && (
                 <section className="space-y-3">

@@ -25,6 +25,9 @@ export type ProductFormData = {
   description: string;
   notes: string;
   status: string;
+  requires_expiry: boolean;
+  shelf_life_days: string;
+  expiry_warning_days: string;
   skus: ProductSkuForm[];
 };
 
@@ -47,6 +50,9 @@ export const emptyProductForm = (): ProductFormData => ({
   description: '',
   notes: '',
   status: 'active',
+  requires_expiry: false,
+  shelf_life_days: '',
+  expiry_warning_days: '',
   skus: [],
 });
 
@@ -331,6 +337,47 @@ export default function ProductForm({
         </div>
       </div>
 
+      <div className="rounded-xl border border-border p-4 space-y-3 bg-canvas-subtle/40">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.requires_expiry}
+            onChange={e => set('requires_expiry', e.target.checked)}
+            className="w-4 h-4 rounded border-border text-accent-600"
+          />
+          <span className="text-sm font-semibold">Requires expiry date on receive</span>
+        </label>
+        <p className="text-xs text-muted">
+          When on, Receiving must enter an expiry date. Warning window: product override → category → default 14 days (use 2 for fresh produce/meat).
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-sm font-medium text-muted mb-1.5 block">Shelf life (days)</label>
+            <Input
+              type="number"
+              min={0}
+              value={form.shelf_life_days}
+              onChange={ch('shelf_life_days')}
+              placeholder="e.g. 30"
+              disabled={!form.requires_expiry}
+            />
+            <p className="text-[10px] text-muted mt-1">Optional: suggests expiry = receive date + days</p>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-muted mb-1.5 block">Warn before (days)</label>
+            <Input
+              type="number"
+              min={0}
+              value={form.expiry_warning_days}
+              onChange={ch('expiry_warning_days')}
+              placeholder="Blank = category/14"
+              disabled={!form.requires_expiry}
+            />
+            <p className="text-[10px] text-muted mt-1">e.g. 14 grocery · 2 fresh</p>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="text-sm font-medium text-muted mb-1.5 block">Default Tax %</label>
@@ -369,6 +416,9 @@ export function productToForm(p: Record<string, unknown>): ProductFormData {
     description: String(p.description || ''),
     notes: String(p.notes || ''),
     status: String(p.status || 'active'),
+    requires_expiry: Boolean(p.requires_expiry),
+    shelf_life_days: p.shelf_life_days != null && p.shelf_life_days !== '' ? String(p.shelf_life_days) : '',
+    expiry_warning_days: p.expiry_warning_days != null && p.expiry_warning_days !== '' ? String(p.expiry_warning_days) : '',
     skus: skusRaw.map(s => skuToForm(s as Parameters<typeof skuToForm>[0])),
   };
 }
@@ -393,6 +443,9 @@ export function formToPayload(form: ProductFormData, branchId?: string) {
     tax_rate: parseFloat(form.tax_rate) || 0,
     notes: form.notes.trim() || null,
     status: form.status || 'active',
+    requires_expiry: Boolean(form.requires_expiry),
+    shelf_life_days: form.shelf_life_days.trim() !== '' ? parseInt(form.shelf_life_days, 10) || null : null,
+    expiry_warning_days: form.expiry_warning_days.trim() !== '' ? parseInt(form.expiry_warning_days, 10) || null : null,
     skus: form.skus.map(s => skuFormToPayload(s)),
     branch_id: branchId,
   };

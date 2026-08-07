@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useScanner } from '../hooks/useScanner';
 import {
   ShoppingBag, Plus, Minus, Trash2, Loader2, CreditCard, Banknote,
   Pause, Play, RotateCcw, Usb, User, Tag, Percent, StickyNote,
-  Eye, Keyboard, Star,
+  Eye, Keyboard, Star, AlertTriangle,
 } from 'lucide-react';
 import { formatCurrency } from '../utils/formatCurrency';
 import { get, post, getUserMessage } from '../api';
@@ -90,6 +91,7 @@ export default function Checkout() {
   const [showHeldModal, setShowHeldModal] = useState(false);
   const [taxRate, setTaxRate] = useState(0);
   const [discountPresets, setDiscountPresets] = useState<{ id: string; name: string; type: 'percent' | 'fixed'; value: number }[]>([]);
+  const [expiryBanner, setExpiryBanner] = useState<{ total: number; expired: number; near: number } | null>(null);
 
   const [qtyEditId, setQtyEditId] = useState<string | null>(null);
   const [qtyEditValue, setQtyEditValue] = useState('');
@@ -102,15 +104,27 @@ export default function Checkout() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [prodRes, catRes, custRes, settingsRes] = await Promise.all([
+      const [prodRes, catRes, custRes, settingsRes, expRes] = await Promise.all([
         get<{ products?: Product[] }>(`/products/?branch_id=${branchId}`),
         get<{ categories?: Category[] }>('/v1/categories/'),
         get<{ customers?: Customer[] }>('/v1/customers/'),
         get<{ config?: Record<string, unknown> }>(`/settings/?branch_id=${branchId}`),
+        get<{ total_count?: number; expired_count?: number; near_expiry_count?: number }>(
+          `/v1/expiry/alerts?branch_id=${branchId}`,
+        ).catch(() => null),
       ]);
       setProducts(prodRes?.products ?? []);
       setCategories(catRes?.categories ?? []);
       setCustomers(custRes?.customers ?? []);
+      if (expRes && (expRes.total_count || 0) > 0) {
+        setExpiryBanner({
+          total: expRes.total_count || 0,
+          expired: expRes.expired_count || 0,
+          near: expRes.near_expiry_count || 0,
+        });
+      } else {
+        setExpiryBanner(null);
+      }
       const cfg = settingsRes?.config ?? {};
       const taxEnabled = cfg.tax_enabled !== false;
       const rates = (cfg.tax_rates_by_payment_method as Record<string, number>) || {};
@@ -442,6 +456,26 @@ export default function Checkout() {
             placeholder="Scan barcode or search… (F1)"
             autoFocus
           />
+
+          {expiryBanner && (
+            <Link
+              to="/inventory"
+              className="mt-3 flex items-start gap-2 rounded-xl border border-warning/40 bg-warning-soft px-3 py-2 text-sm hover:border-warning transition-colors"
+            >
+              <AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
+              <span className="text-foreground">
+                <span className="font-semibold">Expiry warning:</span>{' '}
+                {expiryBanner.expired > 0 && (
+                  <span className="text-danger font-medium">{expiryBanner.expired} expired</span>
+                )}
+                {expiryBanner.expired > 0 && expiryBanner.near > 0 ? ' · ' : ''}
+                {expiryBanner.near > 0 && (
+                  <span>{expiryBanner.near} lot{expiryBanner.near !== 1 ? 's' : ''} expiring soon</span>
+                )}
+                <span className="text-muted"> — open Inventory → Alerts</span>
+              </span>
+            </Link>
+          )}
 
           {/* Category filter chips */}
           <div className="flex gap-2 mt-3 overflow-x-auto scroll-smooth pb-1 -mx-1 px-1">

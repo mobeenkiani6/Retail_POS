@@ -103,7 +103,7 @@ export function SettingsPage() {
             <label className="section-label">Business name</label>
             <input className="input mt-1 h-10" value={businessName} onChange={(e) => setField('businessName', e.target.value)} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="section-label">Currency</label>
               <input className="input mt-1 h-10" value={currency} onChange={(e) => setField('currency', e.target.value)} />
@@ -158,7 +158,7 @@ export function SettingsPage() {
               onValueChange={(v) => setField('taxPercentage', v)}
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="section-label">Cash tax %</label>
               <NumberField className="input mt-1 h-10" value={cashTax} onValueChange={(v) => setField('cashTax', v)} />
@@ -345,7 +345,7 @@ export function SettingsPage() {
                 placeholder="Optional line under the header"
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="section-label">GST / tax ID</label>
                 <input className="input mt-1 h-10" value={receipt.gstNumber} onChange={(e) => updateReceipt('gstNumber', e.target.value)} />

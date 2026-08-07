@@ -60,14 +60,14 @@ export function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <Kpi label="Today" value={money(data.revenue.today?.revenue)} sub={`${data.revenue.today?.orders || 0} orders · ${money(data.revenue.today?.profit || 0)} profit`} icon={TrendingUp} />
         <Kpi label="This week" value={money(data.revenue.week?.revenue)} sub={`${data.revenue.week?.orders || 0} orders`} icon={ShoppingBag} />
         <Kpi label="This month" value={money(data.revenue.month?.revenue)} sub={`${money(data.revenue.month?.profit || 0)} profit`} icon={TrendingUp} />
         <Kpi label="This year" value={money(data.revenue.year?.revenue)} sub={`${data.revenue.year?.orders || 0} orders`} icon={ShoppingBag} />
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <Kpi label="Orders today" value={String(data.orders.total || 0)} sub={`Completed ${data.orders.completed || 0} · Held ${data.orders.held || 0} · Refunded ${data.orders.refunded || 0}`} icon={ShoppingBag} />
         <Kpi label="Low / out of stock" value={`${data.inventory.low_stock || 0} / ${data.inventory.out_of_stock || 0}`} sub={`Expiring ${data.inventory.expiring || 0} · Dead ${data.inventory.dead_stock || 0}`} icon={AlertTriangle} />
         <Kpi label="Customers" value={String(data.customers.active || 0)} sub={`New today ${data.customers.new || 0} · ${fullLabel('VIP')} ${data.customers.vip || 0}`} icon={Users} />

@@ -110,6 +110,17 @@ def update_grn_route(current_user, grn_id):
                 if sku:
                     product_id = sku.product_id
             ru = _normalize_receive_unit(item.get('receive_unit'))
+            from app.services.expiry_service import parse_expiry_date, suggest_expiry_from_shelf_life
+            from app.models import Product
+            product = Product.query.get(product_id)
+            try:
+                expiry = parse_expiry_date(item.get('expiry_date'))
+            except ValueError as e:
+                return error_response('Bad Request', str(e), 400)
+            if product and product.requires_expiry and not expiry:
+                expiry = suggest_expiry_from_shelf_life(product)
+            if product and product.requires_expiry and not expiry:
+                return error_response('Bad Request', f'Expiry date is required for {product.name}', 400)
             grn_item = GRNItem(
                 grn_id=grn.id,
                 product_id=product_id,
@@ -120,7 +131,7 @@ def update_grn_route(current_user, grn_id):
                 receive_unit=ru,
                 cost_price=item['cost_price'],
                 sell_price=item.get('sell_price', 0),
-                expiry_date=item.get('expiry_date'),
+                expiry_date=expiry,
             )
             db.session.add(grn_item)
     db.session.commit()

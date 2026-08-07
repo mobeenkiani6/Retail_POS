@@ -20,9 +20,9 @@ export function ForecastPage() {
         <p className="text-sm text-muted mt-1">Moving-average demand and reorder suggestions</p>
       </div>
       <div className="grid lg:grid-cols-2 gap-4">
-        <div className="panel overflow-hidden">
+        <div className="panel overflow-x-auto">
           <div className="px-4 py-3 section-label border-b border-border">Demand forecast (7d)</div>
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[480px]">
             <thead className="text-left text-xs text-muted"><tr><th className="px-4 py-2">Product</th><th className="px-4 py-2">Daily avg</th><th className="px-4 py-2">Forecast</th></tr></thead>
             <tbody>
               {demand.slice(0, 30).map((d) => (
@@ -36,9 +36,9 @@ export function ForecastPage() {
           </table>
           {!demand.length && <div className="p-6 text-sm text-muted text-center">Need sales history</div>}
         </div>
-        <div className="panel overflow-hidden">
+        <div className="panel overflow-x-auto">
           <div className="px-4 py-3 section-label border-b border-border">Reorder suggestions</div>
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[480px]">
             <thead className="text-left text-xs text-muted"><tr><th className="px-4 py-2">Product</th><th className="px-4 py-2">Cover (d)</th><th className="px-4 py-2">Reorder</th></tr></thead>
             <tbody>
               {inv.slice(0, 30).map((d) => (

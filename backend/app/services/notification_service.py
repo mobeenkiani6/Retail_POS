@@ -67,4 +67,11 @@ def generate_system_notifications(branch_id=None):
                 severity='danger',
             ))
 
+    db.session.flush()
+    try:
+        from app.services.expiry_service import upsert_expiry_notifications
+        upsert_expiry_notifications(branch_id)
+    except Exception as e:
+        print(f'Warning: expiry notification scan failed: {e}')
+
     db.session.commit()

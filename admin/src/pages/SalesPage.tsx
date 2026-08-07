@@ -109,11 +109,11 @@ export function SalesPage() {
         )}
       </div>
 
-      <div className="panel overflow-hidden">
+      <div className="panel overflow-x-auto">
         {loading ? (
           <div className="skeleton h-40 m-4" />
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[640px]">
             <thead className="bg-canvas-subtle">
               <tr>
                 <SortableTh label="Invoice" sortKey="invoice_sort" activeKey={sortKey} dir={sortDir} onToggle={toggle} />

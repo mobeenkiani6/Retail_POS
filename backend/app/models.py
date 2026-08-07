@@ -55,6 +55,8 @@ class Category(db.Model):
     sort_order = db.Column(db.Integer, default=0)
     icon = db.Column(db.String(50), nullable=True)
     image_url = db.Column(db.Text, nullable=True)
+    # Days before expiry to warn (e.g. 2 for fresh produce, 14 for grocery). Null = use product/default.
+    expiry_warning_days = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
     archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
@@ -164,6 +166,8 @@ class Product(db.Model):
     cost_price = db.Column(db.Numeric(12, 2), nullable=False, default=0)
     tax_rate = db.Column(db.Numeric(5, 2), default=0)
     requires_expiry = db.Column(db.Boolean, default=False)
+    shelf_life_days = db.Column(db.Integer, nullable=True)  # optional: auto-suggest expiry on receive
+    expiry_warning_days = db.Column(db.Integer, nullable=True)  # override category/default warning window
     image_url = db.Column(db.Text, nullable=True, default='')
     brand = db.Column(db.String(120), nullable=True)
     unit = db.Column(db.String(50), nullable=True, default='each')
@@ -266,6 +270,7 @@ class ProductBatch(db.Model):
     __tablename__ = 'product_batches'
     id = db.Column(db.Integer, primary_key=True)
     product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
+    sku_id = db.Column(db.Integer, db.ForeignKey('product_skus.id'), nullable=True)
     branch_id = db.Column(db.String(36), db.ForeignKey('branches.id'), nullable=False)
     batch_number = db.Column(db.String(100), nullable=False)
     quantity = db.Column(db.Integer, default=0)
@@ -278,6 +283,7 @@ class ProductBatch(db.Model):
 
     movements = db.relationship('BatchMovement', backref='batch', lazy=True)
     sale_items = db.relationship('SaleItem', backref='batch', lazy=True)
+    sku = db.relationship('ProductSku', backref='batches', lazy=True)
 
     __table_args__ = (
         db.UniqueConstraint('branch_id', 'product_id', 'batch_number', name='_branch_product_batch_uc'),

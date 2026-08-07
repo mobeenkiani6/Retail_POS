@@ -35,7 +35,7 @@ export function CustomersPage() {
         </div>
         <TableSearch value={q} onChange={setQ} placeholder="Search customers…" />
       </div>
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {segments.map((s) => (
           <div key={s.key} className="panel p-3">
             <div className="section-label">{s.name}</div>
@@ -43,8 +43,8 @@ export function CustomersPage() {
           </div>
         ))}
       </div>
-      <div className="panel overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="panel overflow-x-auto">
+        <table className="w-full text-sm min-w-[640px]">
           <thead className="bg-canvas-subtle">
             <tr>
               <SortableTh label="Name" sortKey="name" activeKey={sortKey} dir={sortDir} onToggle={toggle} />

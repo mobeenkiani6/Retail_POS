@@ -63,8 +63,8 @@ export function BranchesPage() {
       </form>
       {message && <div className="text-sm text-success">{message}</div>}
 
-      <div className="panel overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="panel overflow-x-auto">
+        <table className="w-full text-sm min-w-[560px]">
           <thead className="bg-canvas-subtle">
             <tr>
               <SortableTh label="Name" sortKey="name" activeKey={sortKey} dir={sortDir} onToggle={toggle} />
