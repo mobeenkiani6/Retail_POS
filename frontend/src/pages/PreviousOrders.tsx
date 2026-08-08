@@ -15,6 +15,7 @@ import { formatCurrency } from '../utils/formatCurrency';
 import { showToast } from '../components/Toast';
 import { showConfirm } from '../components/ConfirmDialog';
 import { useCheckoutStore } from '../stores/checkoutStore';
+import { SALES_UPDATED_EVENT, useRealtimeReload } from '../hooks/useRealtimeSync';
 
 function FieldShell({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -178,6 +179,7 @@ export default function PreviousOrders() {
   }, [timeFilter, startDate, endDate, debouncedFilters, paymentMethodFilter, status, page]);
 
   useEffect(() => { load(); }, [load]);
+  useRealtimeReload([SALES_UPDATED_EVENT], () => { void load(); });
 
   const openDetail = async (saleId: number) => {
     setDetailLoading(true);

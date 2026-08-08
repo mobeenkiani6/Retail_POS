@@ -138,16 +138,19 @@ class PrinterService:
             return False
 
     def _get_receipt_settings(self, branch_id=None):
-        """Load receipt design from settings (global + branch merged)."""
+        """Load receipt design from global settings (shared with Admin panel)."""
         global_setting = Setting.query.filter_by(branch_id=None).first()
         global_config = (global_setting.config or {}).copy() if global_setting else {}
 
-        if branch_id is not None:
+        # Legacy fallback: if global has no receipt yet, peek at branch row
+        receipt = global_config.get('receipt_settings') or {}
+        if not receipt and branch_id is not None:
             branch_setting = Setting.query.filter_by(branch_id=branch_id).first()
             if branch_setting and branch_setting.config:
-                global_config = {**global_config, **branch_setting.config}
+                receipt = (branch_setting.config or {}).get('receipt_settings') or {}
+                # Still merge non-receipt branch keys for tax_rate etc.
+                global_config = {**global_config, **(branch_setting.config or {})}
 
-        receipt = global_config.get('receipt_settings') or {}
         branding = global_config.get('branding') or {}
         hardware = global_config.get('hardware') or {}
         return {

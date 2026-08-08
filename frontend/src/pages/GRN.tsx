@@ -1,18 +1,22 @@
-import { useEffect, useState, useMemo } from 'react';
-import { Plus, CheckCircle, PackageCheck, Copy, Trash2, Edit2, Printer, ChevronDown, ChevronRight, Eye } from 'lucide-react';
+import { useEffect, useState, useMemo, useRef } from 'react';
+import { Plus, CheckCircle, PackageCheck, Copy, Trash2, Edit2, Printer, ChevronDown, ChevronRight, Eye, ScanBarcode } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import PageHeader from '../components/ui/PageHeader';
 import Button from '../components/ui/Button';
 import StatusBadge from '../components/ui/StatusBadge';
 import Modal from '../components/ui/Modal';
 import Input from '../components/ui/Input';
 import EmptyState from '../components/ui/EmptyState';
-import { get, post, put, del, getUserMessage } from '../api';
+import { get, post, put, del, getUserMessage, isApiError } from '../api';
 import { formatCurrency } from '../utils/formatCurrency';
 import { showToast } from '../components/Toast';
 import { showConfirm } from '../components/ConfirmDialog';
 import { formatSkuLabel, type ProductSku } from '../utils/productSkus';
 import { getBranchId } from '../branch';
 import { useGrnStore, type GrnProductBlock, type GrnSkuLine } from '../stores/grnStore';
+import { lookupBarcode } from '../components/products/BarcodeField';
+import { useProductsStore } from '../stores/productsStore';
+import { validateBarcode } from '../utils/barcode';
 
 type GRNItem = {
   id?: number;
@@ -171,6 +175,8 @@ function itemsFromBlocks(blocks: GrnProductBlock[]): GRNItem[] {
 }
 
 export default function GRNPage() {
+  const navigate = useNavigate();
+  const openCreateProduct = useProductsStore(s => s.openCreate);
   const [grns, setGrns] = useState<GRN[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -180,6 +186,10 @@ export default function GRNPage() {
   const [partialQty, setPartialQty] = useState<Record<number, string>>({});
   const [receiving, setReceiving] = useState(false);
   const [viewingGrn, setViewingGrn] = useState<GRN | null>(null);
+  const [scanCode, setScanCode] = useState('');
+  const [scanBusy, setScanBusy] = useState(false);
+  const [notFoundBarcode, setNotFoundBarcode] = useState('');
+  const scanRef = useRef<HTMLInputElement>(null);
 
   const {
     modalOpen,
@@ -258,6 +268,71 @@ export default function GRNPage() {
     }
     setBlocks(prev => [...prev, { product_id: pid, expanded: true, skus }]);
     setPickerProductId('');
+  };
+
+  const addFromBarcode = async (raw: string) => {
+    const local = validateBarcode(raw);
+    if (!local.ok || !local.normalized) {
+      showToast(local.error || 'Enter or scan a barcode', 'error');
+      return;
+    }
+    setScanBusy(true);
+    setNotFoundBarcode('');
+    try {
+      const hit = await lookupBarcode(local.normalized);
+      let product = products.find(p => p.id === hit.product_id);
+      if (!product) {
+        // Refresh products list so newly created items appear
+        const p = await get<{ products?: Product[] }>(`/products/?branch_id=${branchId}`);
+        setProducts(p?.products ?? []);
+        product = (p?.products ?? []).find(x => x.id === hit.product_id);
+      }
+      if (!product) {
+        showToast('Product found but could not load details', 'error');
+        return;
+      }
+
+      const skuId = hit.sku_id;
+      setBlocks(prev => {
+        const existing = prev.find(b => b.product_id === product!.id);
+        if (existing) {
+          return prev.map(b => {
+            if (b.product_id !== product!.id) return b;
+            return {
+              ...b,
+              expanded: true,
+              skus: b.skus.map(s =>
+                s.sku_id === skuId
+                  ? { ...s, selected: true, quantity: Math.max(1, s.quantity || 1) }
+                  : s,
+              ),
+            };
+          });
+        }
+        const skus = skusFromProduct(product!).map(s =>
+          s.sku_id === skuId ? { ...s, selected: true } : s,
+        );
+        return [...prev, { product_id: product!.id, expanded: true, skus }];
+      });
+      showToast(`${hit.product_name || hit.name} added`, 'success');
+      setScanCode('');
+      setTimeout(() => scanRef.current?.focus(), 50);
+    } catch (e) {
+      if (isApiError(e) && e.status === 404) {
+        setNotFoundBarcode(local.normalized);
+        showToast('Product not found for this barcode', 'error');
+      } else {
+        showToast(getUserMessage(e), 'error');
+      }
+    } finally {
+      setScanBusy(false);
+    }
+  };
+
+  const createMissingProduct = () => {
+    if (!notFoundBarcode) return;
+    openCreateProduct({ barcode: notFoundBarcode });
+    navigate('/grocery-products');
   };
 
   const removeBlock = (productId: number) => {
@@ -913,13 +988,56 @@ export default function GRNPage() {
           {/* Add product */}
           <div className="rounded-xl border border-border bg-canvas-subtle/50 p-4 space-y-3">
             <h4 className="text-sm font-semibold">Add Product</h4>
+
+            <div className="rounded-lg border border-border bg-surface p-3 space-y-2">
+              <label className="text-xs font-medium text-muted inline-flex items-center gap-1.5">
+                <ScanBarcode className="w-3.5 h-3.5" /> Scan Product Barcode
+              </label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  ref={scanRef}
+                  value={scanCode}
+                  onChange={e => setScanCode(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addFromBarcode(scanCode);
+                    }
+                  }}
+                  placeholder="Scan or type barcode…"
+                  className="input-base flex-1 font-mono"
+                  autoComplete="off"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => addFromBarcode(scanCode)}
+                  disabled={scanBusy || !scanCode.trim()}
+                  className="shrink-0"
+                >
+                  <ScanBarcode className="w-4 h-4" /> Find
+                </Button>
+              </div>
+              {notFoundBarcode && (
+                <div className="rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-xs space-y-2">
+                  <p className="font-semibold text-warning">Product not found for barcode {notFoundBarcode}.</p>
+                  <Button type="button" size="sm" onClick={createMissingProduct}>
+                    Create New Product
+                  </Button>
+                </div>
+              )}
+              <p className="text-[11px] text-muted">
+                Scanning an existing barcode adds that pack size to this receiving note — no need to recreate the product.
+              </p>
+            </div>
+
             <div className="flex flex-col sm:flex-row gap-2">
               <select
                 value={pickerProductId}
                 onChange={e => setPickerProductId(e.target.value)}
                 className="input-base flex-1"
               >
-                <option value="">Select product…</option>
+                <option value="">Or select product…</option>
                 {products.filter(p => (p.skus?.length ?? 0) > 0).map(p => (
                   <option key={p.id} value={p.id}>{p.name} ({p.skus?.length} variants)</option>
                 ))}

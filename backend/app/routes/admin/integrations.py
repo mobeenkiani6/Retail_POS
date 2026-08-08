@@ -85,6 +85,39 @@ def update_business_settings(current_user):
     config = data.get('config')
     if config is None:
         return jsonify({'message': 'config required'}), 400
+
+    # Receipt is shared Admin ↔ POS — always write to global and clear branch shadows
+    if isinstance(config, dict) and any(
+        k in config for k in ('receipt_settings', 'receipt_header', 'receipt_footer', 'receipt', 'receipt_template')
+    ):
+        from app.models import Setting
+        from sqlalchemy.orm.attributes import flag_modified
+        s = Setting.query.filter_by(branch_id=None).first()
+        if not s:
+            s = Setting(branch_id=None, config={})
+            db.session.add(s)
+            db.session.flush()
+        merged = {**(s.config or {}), **config}
+        if isinstance((s.config or {}).get('receipt_settings'), dict) and isinstance(config.get('receipt_settings'), dict):
+            merged['receipt_settings'] = {**(s.config or {}).get('receipt_settings', {}), **config['receipt_settings']}
+        s.config = merged
+        flag_modified(s, 'config')
+        # Clear branch receipt overrides
+        for row in Setting.query.filter(Setting.branch_id.isnot(None)).all():
+            cfg = dict(row.config or {})
+            changed = False
+            for key in ('receipt_settings', 'receipt_header', 'receipt_footer', 'receipt', 'receipt_template'):
+                if key in cfg:
+                    cfg.pop(key, None)
+                    changed = True
+            if changed:
+                row.config = cfg
+                flag_modified(row, 'config')
+        db.session.commit()
+        from app.services import event_bus
+        event_bus.settings_updated(None)
+        return jsonify({'config': s.config, 'branch_id': None}), 200
+
     s = Setting.query.filter_by(branch_id=branch_id).first()
     if not s:
         s = Setting(branch_id=branch_id, config=config)

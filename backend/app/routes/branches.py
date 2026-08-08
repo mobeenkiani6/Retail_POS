@@ -89,6 +89,20 @@ def update_branch(current_user, branch_id):
         scoped.address = data.get('address', scoped.address or '').strip()
         scoped.phone = data.get('phone', scoped.phone or '').strip()
         db.session.commit()
+        try:
+            from app.services.event_bus import emit_domain_event
+            emit_domain_event(
+                'branch.updated',
+                {
+                    'id': scoped.id,
+                    'name': scoped.name,
+                    'address': scoped.address,
+                    'phone': scoped.phone,
+                },
+                branch_id=None,  # fan out to Admin + all POS via everyone room
+            )
+        except Exception as emit_err:
+            print(f'[branches] event emit failed: {emit_err}')
         return jsonify({
             'id': scoped.id,
             'name': scoped.name,

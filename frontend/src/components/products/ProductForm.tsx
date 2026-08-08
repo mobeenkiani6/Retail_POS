@@ -5,6 +5,7 @@ import UnitSelect from '../ui/UnitSelect';
 import SkuTable from './SkuTable';
 import { emptySkuForm, skuToForm, skuFormToPayload, type ProductSkuForm } from '../../utils/productSkus';
 import { post } from '../../api';
+import type { ExistingBarcodeProduct } from '../../utils/barcode';
 
 export type ProductFormData = {
   name: string;
@@ -69,14 +70,16 @@ type Props = {
   isEditing?: boolean;
   productId?: number;
   errors?: Record<string, string>;
+  onExistingProduct?: (product: ExistingBarcodeProduct) => void;
 };
 
-function Req({ children }: { children: React.ReactNode }) {
+function Req(_props?: { children?: React.ReactNode }) {
   return <span className="text-danger">*</span>;
 }
 
 export default function ProductForm({
   form, onChange, categories, units, brands, suppliers, isEditing, productId, errors = {},
+  onExistingProduct,
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const hasPackaging = (parseFloat(form.carton_qty) || 0) > 0 || (parseFloat(form.packet_qty) || 0) > 0;
@@ -102,21 +105,13 @@ export default function ProductForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.name, isEditing]);
 
-  // Ensure at least one variant row on create
+  // Ensure at least one variant row on create (barcode left empty for scan/manual entry)
   useEffect(() => {
     if (isEditing || form.skus.length > 0) return;
     const row = emptySkuForm();
     row.variant_name = 'Default';
     row.quantity_value = '1';
-    let cancelled = false;
-    post<{ barcode: string }>('/products/generate-barcode', {})
-      .then(bc => {
-        if (cancelled) return;
-        row.barcode = bc.barcode;
-        set('skus', [row]);
-      })
-      .catch(() => { if (!cancelled) set('skus', [row]); });
-    return () => { cancelled = true; };
+    set('skus', [row]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditing]);
 
@@ -181,8 +176,13 @@ export default function ProductForm({
         </div>
         <div>
           <label className="text-sm font-medium text-muted mb-1.5 block">SKU</label>
-          <Input value={form.sku} onChange={ch('sku')} placeholder="Auto-generated from name" />
-          <p className="text-xs text-muted mt-1.5">Auto-generated for new products. You can still edit it.</p>
+          <Input
+            value={form.sku}
+            readOnly
+            className="bg-canvas-subtle cursor-not-allowed font-mono"
+            placeholder="Auto-generated from name"
+          />
+          <p className="text-xs text-muted mt-1.5">Auto-generated. Sellable SKUs are per variant below.</p>
         </div>
       </div>
 
@@ -296,6 +296,7 @@ export default function ProductForm({
         defaultUnitId={form.unit_id}
         defaultUnitAbbr={form.unit}
         isEditing={isEditing}
+        onExistingProduct={onExistingProduct}
       />
 
       <div>

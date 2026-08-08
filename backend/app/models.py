@@ -205,8 +205,8 @@ class ProductSku(db.Model):
     )
     id = db.Column(db.Integer, primary_key=True)
     product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), nullable=False)
-    sku_code = db.Column(db.String(100), nullable=False)
-    barcode = db.Column(db.String(100), unique=True, nullable=False)
+    sku_code = db.Column(db.String(100), nullable=False, unique=True)
+    barcode = db.Column(db.String(100), unique=True, nullable=True)  # nullable for unpackaged goods
     variant_name = db.Column(db.String(100), nullable=False, default='Standard')
     quantity_value = db.Column(db.Numeric(12, 3), nullable=False, default=1)
     unit_id = db.Column(db.Integer, db.ForeignKey('units.id'), nullable=True)

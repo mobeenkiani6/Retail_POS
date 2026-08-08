@@ -1,15 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Loader2, Upload } from 'lucide-react';
 import { showToast } from '../Toast';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { get, put, getUserMessage } from '../../api';
-import { getBranchId } from '../../branch';
+import {
+  SETTINGS_UPDATED_EVENT,
+  useRealtimeReload,
+} from '../../hooks/useRealtimeSync';
 
 type SettingsResponse = { config?: Record<string, unknown> };
 
 export default function ReceiptSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const dirtyRef = useRef(false);
 
   const [businessName, setBusinessName] = useState('My Business');
   const [businessAddress, setBusinessAddress] = useState('123 Main Street\nCity, ST 12345');
@@ -32,78 +36,99 @@ export default function ReceiptSettings() {
   const [qrCodeContent, setQrCodeContent] = useState('');
   const [taxRate, setTaxRate] = useState(8);
 
-  useEffect(() => {
-    fetchSettings();
-  }, []);
+  const markDirty = () => {
+    dirtyRef.current = true;
+  };
 
-  const fetchSettings = async () => {
-    try {
-      setLoading(true);
-      // Reset to defaults first to avoid stale data from previous branch
-      setBusinessName('My Business');
-      setBusinessAddress('123 Main Street\nCity, ST 12345');
-      setBusinessPhone('(555) 123-4567');
-      setLogoUrl('');
-      setLogoHeight(140);
-      setHeaderFontScale(1);
-      setBodyFontScale(1);
-      setTotalFontScale(1);
-      setFooterMessage('Thank you for shopping!');
-      setFooterLine1('');
-      setFooterLine2('');
-      setFooterLine3('');
-      setGstNumber('');
-      setNtnNumber('');
-      setCustomId1Label('');
-      setCustomId1Value('');
-      setCustomId2Label('');
-      setCustomId2Value('');
-      setQrCodeContent('');
-      setTaxRate(8);
-
-      const activeBranchId = getBranchId();
-      const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
-      const data = await get<SettingsResponse>(`/settings/${query}`);
-      const st = (data?.config?.receipt_settings ?? {}) as Record<string, string | number | undefined>;
-      if (st.businessName) setBusinessName(String(st.businessName));
-      if (st.businessAddress) setBusinessAddress(String(st.businessAddress));
-      if (st.businessPhone) setBusinessPhone(String(st.businessPhone));
-      if (st.logoUrl) setLogoUrl(String(st.logoUrl));
-      if (typeof st.logoHeight === 'number' && st.logoHeight >= 80 && st.logoHeight <= 250) setLogoHeight(st.logoHeight);
-      if (typeof st.headerFontScale === 'number' && st.headerFontScale >= 1 && st.headerFontScale <= 4) setHeaderFontScale(st.headerFontScale);
-      if (typeof st.bodyFontScale === 'number' && st.bodyFontScale >= 1 && st.bodyFontScale <= 4) setBodyFontScale(st.bodyFontScale);
-      if (typeof st.totalFontScale === 'number' && st.totalFontScale >= 1 && st.totalFontScale <= 4) setTotalFontScale(st.totalFontScale);
-      if (st.footerMessage) setFooterMessage(String(st.footerMessage));
-      if (st.footerLine1 != null) setFooterLine1(String(st.footerLine1 ?? ''));
-      if (st.footerLine2 != null) setFooterLine2(String(st.footerLine2 ?? ''));
-      if (st.footerLine3 != null) setFooterLine3(String(st.footerLine3 ?? ''));
-      if (st.gstNumber != null) setGstNumber(String(st.gstNumber ?? ''));
-      if (st.ntnNumber != null) setNtnNumber(String(st.ntnNumber ?? ''));
-      if (st.customId1Label != null) setCustomId1Label(String(st.customId1Label ?? ''));
-      if (st.customId1Value != null) setCustomId1Value(String(st.customId1Value ?? ''));
-      if (st.customId2Label != null) setCustomId2Label(String(st.customId2Label ?? ''));
-      if (st.customId2Value != null) setCustomId2Value(String(st.customId2Value ?? ''));
-      if (st.qrCodeContent != null) setQrCodeContent(String(st.qrCodeContent ?? ''));
-      if (data?.config && typeof (data.config as Record<string, unknown>).tax_rate === 'number') {
-        setTaxRate((data.config as Record<string, number>).tax_rate);
-      }
-    } catch (e) {
-      showToast(getUserMessage(e), 'error');
-    } finally {
-      setLoading(false);
+  const applyReceiptConfig = (
+    st: Record<string, string | number | undefined>,
+    config?: Record<string, unknown>,
+    opts?: { skipLogo?: boolean },
+  ) => {
+    if (st.businessName != null) setBusinessName(String(st.businessName));
+    if (st.businessAddress != null) setBusinessAddress(String(st.businessAddress));
+    if (st.businessPhone != null) setBusinessPhone(String(st.businessPhone));
+    if (!opts?.skipLogo && st.logoUrl != null) setLogoUrl(String(st.logoUrl));
+    if (typeof st.logoHeight === 'number' && st.logoHeight >= 80 && st.logoHeight <= 250) setLogoHeight(st.logoHeight);
+    if (typeof st.headerFontScale === 'number' && st.headerFontScale >= 1 && st.headerFontScale <= 4) setHeaderFontScale(st.headerFontScale);
+    if (typeof st.bodyFontScale === 'number' && st.bodyFontScale >= 1 && st.bodyFontScale <= 4) setBodyFontScale(st.bodyFontScale);
+    if (typeof st.totalFontScale === 'number' && st.totalFontScale >= 1 && st.totalFontScale <= 4) setTotalFontScale(st.totalFontScale);
+    if (st.footerMessage != null) setFooterMessage(String(st.footerMessage));
+    if (st.footerLine1 != null) setFooterLine1(String(st.footerLine1 ?? ''));
+    if (st.footerLine2 != null) setFooterLine2(String(st.footerLine2 ?? ''));
+    if (st.footerLine3 != null) setFooterLine3(String(st.footerLine3 ?? ''));
+    if (st.gstNumber != null) setGstNumber(String(st.gstNumber ?? ''));
+    if (st.ntnNumber != null) setNtnNumber(String(st.ntnNumber ?? ''));
+    if (st.customId1Label != null) setCustomId1Label(String(st.customId1Label ?? ''));
+    if (st.customId1Value != null) setCustomId1Value(String(st.customId1Value ?? ''));
+    if (st.customId2Label != null) setCustomId2Label(String(st.customId2Label ?? ''));
+    if (st.customId2Value != null) setCustomId2Value(String(st.customId2Value ?? ''));
+    if (st.qrCodeContent != null) setQrCodeContent(String(st.qrCodeContent ?? ''));
+    if (config && typeof config.tax_rate === 'number') {
+      setTaxRate(config.tax_rate as number);
     }
   };
+
+  const fetchSettings = async (opts?: { soft?: boolean }) => {
+    try {
+      if (!opts?.soft) {
+        setLoading(true);
+        dirtyRef.current = false;
+        setBusinessName('My Business');
+        setBusinessAddress('123 Main Street\nCity, ST 12345');
+        setBusinessPhone('(555) 123-4567');
+        setLogoUrl('');
+        setLogoHeight(140);
+        setHeaderFontScale(1);
+        setBodyFontScale(1);
+        setTotalFontScale(1);
+        setFooterMessage('Thank you for shopping!');
+        setFooterLine1('');
+        setFooterLine2('');
+        setFooterLine3('');
+        setGstNumber('');
+        setNtnNumber('');
+        setCustomId1Label('');
+        setCustomId1Value('');
+        setCustomId2Label('');
+        setCustomId2Value('');
+        setQrCodeContent('');
+        setTaxRate(8);
+      }
+
+      // Receipt settings are shared globally with the Admin panel
+      const data = await get<SettingsResponse>('/settings/?global_only=1');
+      const st = (data?.config?.receipt_settings ?? {}) as Record<string, string | number | undefined>;
+      // Soft reloads must not overwrite an unsaved local logo (data URL)
+      const skipLogo = Boolean(opts?.soft && dirtyRef.current);
+      applyReceiptConfig(st, data?.config, { skipLogo });
+    } catch (e) {
+      if (!opts?.soft) showToast(getUserMessage(e), 'error');
+    } finally {
+      if (!opts?.soft) setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchSettings();
+  }, []);
+
+  // Live sync when Admin saves — skip while this form has unsaved edits
+  useRealtimeReload([SETTINGS_UPDATED_EVENT], () => {
+    if (dirtyRef.current) return;
+    void fetchSettings({ soft: true });
+  });
 
   const handleSave = async () => {
     try {
       setSaving(true);
-      const activeBranchId = getBranchId();
-      const query = activeBranchId ? `?branch_id=${activeBranchId}` : '';
-      const existing = await get<SettingsResponse>(`/settings/${query}`);
+      const existing = await get<SettingsResponse>('/settings/?global_only=1');
       const currentConfig = (existing?.config ?? {}) as Record<string, unknown>;
+      const prevReceipt = (currentConfig.receipt_settings as Record<string, unknown>) || {};
       const newSettings = {
         ...currentConfig,
         receipt_settings: {
+          ...prevReceipt,
           businessName,
           businessAddress,
           businessPhone,
@@ -125,9 +150,9 @@ export default function ReceiptSettings() {
           qrCodeContent,
         },
       };
-      const payload: { config: Record<string, unknown>; branch_id?: string } = { config: newSettings };
-      if (activeBranchId) payload.branch_id = activeBranchId;
-      await put('/settings/', payload);
+      // Always save receipt to global config so Admin panel stays in sync
+      await put('/settings/', { config: newSettings, branch_id: null });
+      dirtyRef.current = false;
       showToast('Receipt settings saved!', 'success');
     } catch (e) {
       showToast(getUserMessage(e), 'error');
@@ -138,18 +163,20 @@ export default function ReceiptSettings() {
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-    
-    // Check size limit (e.g. 1MB max for config payload)
+
     if (file.size > 1024 * 1024) {
       showToast('Logo file must be under 1MB', 'error');
       return;
     }
-    
+
     const reader = new FileReader();
     reader.onloadend = () => {
-      setLogoUrl(reader.result as string);
+      dirtyRef.current = true;
+      setLogoUrl(String(reader.result || ''));
     };
+    reader.onerror = () => showToast('Could not read logo file', 'error');
     reader.readAsDataURL(file);
   };
 
@@ -158,7 +185,9 @@ export default function ReceiptSettings() {
       {/* Settings Form */}
       <div>
         <h3 className="text-2xl font-bold text-foreground mb-2">Receipt Settings</h3>
-        <p className="text-sm text-muted mb-6">Customize how printed receipts look.</p>
+        <p className="text-sm text-muted mb-6">
+          Customize printed receipts. These settings are shared with the Admin panel — save here and Admin sees the same values.
+        </p>
 
         {loading ? (
           <div className="flex items-center gap-2 text-muted py-6">
@@ -220,7 +249,14 @@ export default function ReceiptSettings() {
                     </div>
                  </div>
                  {logoUrl && (
-                    <button onClick={() => setLogoUrl('')} className="text-sm text-red-600 font-medium hover:underline">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        markDirty();
+                        setLogoUrl('');
+                      }}
+                      className="text-sm text-red-600 font-medium hover:underline"
+                    >
                        Remove
                     </button>
                  )}

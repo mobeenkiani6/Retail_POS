@@ -6,6 +6,10 @@ from app.services.sku_service import (
     sku_to_dict, parse_sku_payload, apply_sku_fields,
     generate_barcode, generate_sku_code,
 )
+from app.services.barcode_service import (
+    check_barcode_availability, find_sku_by_barcode, sku_lookup_dict,
+    normalize_barcode, barcode_conflict_message,
+)
 from app.utils.auth_decorators import token_required, owner_required, role_required
 from app.errors import error_response
 from app.branch_scope import resolve_branch_id, require_branch_id
@@ -152,6 +156,24 @@ def _apply_parent_fields(product, parsed):
             setattr(product, field, parsed[field])
 
 
+def _assert_sku_code_unique(sku_code: str, exclude_sku_id: int | None = None):
+    if not sku_code:
+        return
+    q = ProductSku.query.filter(ProductSku.sku_code == sku_code)
+    if exclude_sku_id:
+        q = q.filter(ProductSku.id != exclude_sku_id)
+    if q.first():
+        raise ValueError(f'SKU code {sku_code} already in use')
+
+
+def _assert_barcode_unique(barcode: str | None, exclude_sku_id: int | None = None):
+    if not barcode:
+        return
+    existing = find_sku_by_barcode(barcode, exclude_sku_id=exclude_sku_id)
+    if existing:
+        raise ValueError(barcode_conflict_message(existing))
+
+
 def _save_skus(product, skus_data, branch_id, user_id):
     saved = []
     for i, raw in enumerate(skus_data or []):
@@ -164,20 +186,22 @@ def _save_skus(product, skus_data, branch_id, user_id):
             sku = ProductSku.query.filter_by(id=int(sku_id), product_id=product.id).first()
             if not sku:
                 continue
-            existing_bc = ProductSku.query.filter(
-                ProductSku.barcode == parsed['barcode'], ProductSku.id != sku.id,
-            ).first()
-            if existing_bc:
-                raise ValueError(f'Barcode {parsed["barcode"]} already in use')
+            _assert_barcode_unique(parsed.get('barcode'), exclude_sku_id=sku.id)
+            _assert_sku_code_unique(parsed['sku_code'], exclude_sku_id=sku.id)
             apply_sku_fields(sku, parsed)
         else:
-            existing_bc = ProductSku.query.filter_by(barcode=parsed['barcode']).first()
-            if existing_bc:
-                raise ValueError(f'Barcode {parsed["barcode"]} already in use')
+            _assert_barcode_unique(parsed.get('barcode'))
+            if not parsed.get('sku_code'):
+                parsed['sku_code'] = generate_sku_code(
+                    product.name,
+                    product.id,
+                    variant_name=parsed.get('variant_name'),
+                    quantity_value=parsed.get('quantity_value'),
+                    unit_abbr=parsed.get('unit_abbr'),
+                )
+            _assert_sku_code_unique(parsed['sku_code'])
             sku = ProductSku(product_id=product.id)
             apply_sku_fields(sku, parsed)
-            if not sku.sku_code:
-                sku.sku_code = generate_sku_code(product.name, product.id)
             db.session.add(sku)
             db.session.flush()
         initial = parsed.get('initial_stock', 0)
@@ -204,6 +228,13 @@ def get_products(current_user):
     if brand_id:
         query = query.filter_by(brand_id=int(brand_id))
     if search:
+        # Exact barcode / SKU hits first (checkout-hot path), then fuzzy name search
+        exact_ids = db.session.query(ProductSku.product_id).filter(
+            db.or_(
+                ProductSku.barcode == search,
+                ProductSku.sku_code == search,
+            )
+        ).distinct()
         sku_product_ids = db.session.query(ProductSku.product_id).filter(
             db.or_(
                 ProductSku.barcode.ilike(f'%{search}%'),
@@ -213,8 +244,11 @@ def get_products(current_user):
         ).distinct()
         query = query.filter(
             db.or_(
+                Product.id.in_(exact_ids),
                 Product.name.ilike(f'%{search}%'),
                 Product.description.ilike(f'%{search}%'),
+                Product.sku.ilike(f'%{search}%'),
+                Product.barcode == search,
                 Product.id.in_(sku_product_ids),
             )
         )
@@ -234,9 +268,67 @@ def api_generate_barcode(current_user):
 @role_required('owner', 'manager', 'inventory_manager')
 def api_generate_sku_code(current_user):
     data = request.get_json() or {}
-    name = (data.get('name') or 'Product').strip()
+    name = (data.get('name') or data.get('product_name') or 'Product').strip()
     product_id = data.get('product_id')
-    return jsonify({'sku_code': generate_sku_code(name, product_id)}), 200
+    variant_name = (data.get('variant_name') or '').strip() or None
+    quantity_value = data.get('quantity_value', data.get('quantity'))
+    unit_abbr = (data.get('unit_abbr') or data.get('unit') or '').strip() or None
+    exclude_sku_id = data.get('exclude_sku_id') or data.get('sku_id')
+    try:
+        exclude_sku_id = int(exclude_sku_id) if exclude_sku_id not in (None, '') else None
+    except (TypeError, ValueError):
+        exclude_sku_id = None
+    code = generate_sku_code(
+        name,
+        product_id,
+        variant_name=variant_name,
+        quantity_value=quantity_value,
+        unit_abbr=unit_abbr,
+        exclude_sku_id=exclude_sku_id,
+    )
+    return jsonify({'sku_code': code}), 200
+
+
+@products_bp.route('/check-barcode', methods=['POST', 'GET'])
+@token_required
+def api_check_barcode(current_user):
+    """Validate barcode format and check uniqueness."""
+    if request.method == 'GET':
+        barcode = request.args.get('barcode', '')
+        exclude_sku_id = request.args.get('exclude_sku_id')
+        branch_id = request.args.get('branch_id')
+    else:
+        data = request.get_json() or {}
+        barcode = data.get('barcode', '')
+        exclude_sku_id = data.get('exclude_sku_id')
+        branch_id = data.get('branch_id')
+    try:
+        exclude_sku_id = int(exclude_sku_id) if exclude_sku_id not in (None, '') else None
+    except (TypeError, ValueError):
+        exclude_sku_id = None
+    branch_id = resolve_branch_id(current_user, branch_id)
+    result = check_barcode_availability(barcode, exclude_sku_id=exclude_sku_id, branch_id=branch_id)
+    return jsonify(result), 200
+
+
+@products_bp.route('/barcode/<path:barcode>', methods=['GET'])
+@token_required
+def get_product_by_barcode(current_user, barcode):
+    """Look up a sellable SKU/product by barcode (checkout & receiving)."""
+    code = normalize_barcode(barcode)
+    if not code:
+        return error_response('Bad Request', 'Barcode is required', 400)
+    branch_id = resolve_branch_id(current_user, request.args.get('branch_id'))
+    sku = find_sku_by_barcode(code)
+    if not sku:
+        # Also try sku_code match for convenience
+        sku = ProductSku.query.filter(
+            ProductSku.sku_code == code,
+            ProductSku.archived_at == None,  # noqa: E711
+        ).first()
+    if not sku:
+        return error_response('Not Found', f'Product not found for barcode: {code}', 404)
+    return jsonify(sku_lookup_dict(sku, branch_id)), 200
 
 
 @products_bp.route('/', methods=['POST'])
@@ -248,6 +340,9 @@ def create_product(current_user):
     if err_resp:
         return err_resp
     branch_id = resolve_branch_id(current_user, data.get('branch_id')) or require_branch_id(current_user)
+    # Auto parent SKU if missing
+    if not parsed.get('sku'):
+        parsed['sku'] = generate_sku_code(parsed['name'])
     product = Product(name=parsed['name'], status='active')
     _apply_parent_fields(product, parsed)
     db.session.add(product)
@@ -325,15 +420,26 @@ def list_skus(current_user, product_id):
 def add_sku(current_user, product_id):
     product = Product.query.get_or_404(product_id)
     data = request.get_json() or {}
-    parsed = parse_sku_payload(data, product)
+    try:
+        parsed = parse_sku_payload(data, product)
+    except ValueError as e:
+        return error_response('Bad Request', str(e), 400)
     if not parsed:
-        return error_response('Bad Request', 'Barcode is required', 400)
-    if ProductSku.query.filter_by(barcode=parsed['barcode']).first():
-        return error_response('Conflict', 'Barcode already in use', 409)
+        return error_response('Bad Request', 'Invalid SKU data', 400)
+    try:
+        _assert_barcode_unique(parsed.get('barcode'))
+        if not parsed.get('sku_code'):
+            parsed['sku_code'] = generate_sku_code(
+                product.name, product.id,
+                variant_name=parsed.get('variant_name'),
+                quantity_value=parsed.get('quantity_value'),
+                unit_abbr=parsed.get('unit_abbr'),
+            )
+        _assert_sku_code_unique(parsed['sku_code'])
+    except ValueError as e:
+        return error_response('Conflict', str(e), 409)
     sku = ProductSku(product_id=product.id)
     apply_sku_fields(sku, parsed)
-    if not sku.sku_code:
-        sku.sku_code = generate_sku_code(product.name, product.id)
     db.session.add(sku)
     db.session.flush()
     branch_id = resolve_branch_id(current_user, data.get('branch_id')) or require_branch_id(current_user)
@@ -351,14 +457,17 @@ def update_sku(current_user, product_id, sku_id):
     product = Product.query.get_or_404(product_id)
     sku = ProductSku.query.filter_by(id=sku_id, product_id=product.id).first_or_404()
     data = request.get_json() or {}
-    parsed = parse_sku_payload({**sku_to_dict(sku), **data}, product)
+    try:
+        parsed = parse_sku_payload({**sku_to_dict(sku), **data}, product)
+    except ValueError as e:
+        return error_response('Bad Request', str(e), 400)
     if not parsed:
         return error_response('Bad Request', 'Invalid SKU data', 400)
-    existing_bc = ProductSku.query.filter(
-        ProductSku.barcode == parsed['barcode'], ProductSku.id != sku.id,
-    ).first()
-    if existing_bc:
-        return error_response('Conflict', 'Barcode already in use', 409)
+    try:
+        _assert_barcode_unique(parsed.get('barcode'), exclude_sku_id=sku.id)
+        _assert_sku_code_unique(parsed['sku_code'], exclude_sku_id=sku.id)
+    except ValueError as e:
+        return error_response('Conflict', str(e), 409)
     apply_sku_fields(sku, parsed)
     db.session.commit()
     branch_id = resolve_branch_id(current_user, data.get('branch_id')) or require_branch_id(current_user)

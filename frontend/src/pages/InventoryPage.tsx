@@ -28,6 +28,11 @@ import {
 } from '../utils/stockUnits';
 import { getBranchId } from '../branch';
 import { useInventoryStore } from '../stores/inventoryStore';
+import {
+  CATALOG_UPDATED_EVENT,
+  INVENTORY_UPDATED_EVENT,
+  useRealtimeReload,
+} from '../hooks/useRealtimeSync';
 
 type Product = {
   id: number; name: string; category_name?: string; brand?: string;
@@ -301,6 +306,10 @@ export default function InventoryPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
   useEffect(() => { if (tab === 'history') fetchMovements(); }, [tab, fetchMovements]);
+  useRealtimeReload([INVENTORY_UPDATED_EVENT, CATALOG_UPDATED_EVENT], () => {
+    void fetchData();
+    if (tab === 'history') void fetchMovements();
+  });
 
   const skuRows: SkuRow[] = products.flatMap(p =>
     (p.skus && p.skus.length > 0 ? p.skus : []).map(s => ({

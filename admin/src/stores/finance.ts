@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { get as apiGet, post, put, del } from '../api/client';
 import { useBranchFilter } from './branch';
-import { errMsg } from './helpers';
+import { errMsg, notifyAction } from './helpers';
 
 export type Expense = {
   id: number;
@@ -49,17 +49,23 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
   },
 
   addExpense: async (title, amount) => {
-    await post('/v1/admin/expenses', { title, amount });
-    await get().load();
+    await notifyAction(async () => {
+      await post('/v1/admin/expenses', { title, amount });
+      await get().load();
+    }, 'Expense added', 'Could not add expense');
   },
 
   updateExpense: async (id, data) => {
-    await put(`/v1/admin/expenses/${id}`, data);
-    await get().load();
+    await notifyAction(async () => {
+      await put(`/v1/admin/expenses/${id}`, data);
+      await get().load();
+    }, 'Expense updated', 'Could not update expense');
   },
 
   deleteExpense: async (id) => {
-    await del(`/v1/admin/expenses/${id}`);
-    await get().load();
+    await notifyAction(async () => {
+      await del(`/v1/admin/expenses/${id}`);
+      await get().load();
+    }, 'Expense deleted', 'Could not delete expense');
   },
 }));

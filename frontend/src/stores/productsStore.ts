@@ -16,7 +16,7 @@ type ProductsState = {
   setEditingId: (v: number | null) => void;
   setForm: (v: ProductFormData | ((prev: ProductFormData) => ProductFormData)) => void;
   setExpandedIds: (v: number[] | ((prev: number[]) => number[])) => void;
-  openCreate: () => void;
+  openCreate: (opts?: { barcode?: string }) => void;
   openEdit: (id: number, form: ProductFormData) => void;
   closeModal: () => void;
   clearDraft: () => void;
@@ -43,8 +43,32 @@ export const useProductsStore = create<ProductsState>()(
           expandedIds:
             typeof expandedIds === 'function' ? expandedIds(get().expandedIds) : expandedIds,
         }),
-      openCreate: () =>
-        set({ modalOpen: true, editingId: null, form: emptyProductForm() }),
+      openCreate: (opts) => {
+        const form = emptyProductForm();
+        if (opts?.barcode) {
+          const row = { ...form.skus[0] };
+          // Ensure a default SKU row with prefilled barcode
+          form.skus = [{
+            sku_code: '',
+            barcode: opts.barcode,
+            variant_name: 'Default',
+            quantity_value: '1',
+            unit_id: '',
+            unit_abbr: 'pc',
+            cost_price: '0',
+            selling_price: '0',
+            min_stock: '0',
+            max_stock: '',
+            reorder_level: '0',
+            stock_level: '0',
+            shelf_location: '',
+            notes: '',
+            status: 'active',
+          }];
+          void row;
+        }
+        set({ modalOpen: true, editingId: null, form });
+      },
       openEdit: (editingId, form) => set({ modalOpen: true, editingId, form }),
       closeModal: () => set({ modalOpen: false }),
       clearDraft: () =>

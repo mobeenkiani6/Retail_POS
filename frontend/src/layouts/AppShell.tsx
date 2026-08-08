@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../hooks/useTheme';
 import { get, patch } from '../api';
+import { usePosRealtimeSync } from '../hooks/useRealtimeSync';
 
 const navItems = [
   { icon: LayoutDashboard, path: '/operations', label: 'Dashboard', roles: ['owner', 'manager', 'cashier', 'inventory_manager'] },
@@ -46,6 +47,8 @@ export default function AppShell() {
   }
   const userRole = user?.role || 'cashier';
 
+  usePosRealtimeSync(!isAuthPage && Boolean(localStorage.getItem('auth_token')));
+
   useEffect(() => {
     if (isAuthPage || !localStorage.getItem('auth_token')) return;
     get<{ notifications?: Notification[]; unread_count?: number }>('/v1/notifications/')
@@ -55,6 +58,22 @@ export default function AppShell() {
       })
       .catch(() => {});
   }, [isAuthPage, location.pathname]);
+
+  useEffect(() => {
+    const onRealtime = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ type?: string }>).detail;
+      if (detail?.type === 'notification.created') {
+        get<{ notifications?: Notification[]; unread_count?: number }>('/v1/notifications/')
+          .then(d => {
+            setNotifications(d?.notifications ?? []);
+            setUnreadCount(d?.unread_count ?? 0);
+          })
+          .catch(() => {});
+      }
+    };
+    window.addEventListener('nycto:realtime', onRealtime);
+    return () => window.removeEventListener('nycto:realtime', onRealtime);
+  }, []);
 
   useEffect(() => {
     setNavOpen(false);

@@ -3,6 +3,8 @@ import { Loader2, MapPin, Phone, Copy, Check, Building2 } from 'lucide-react';
 import { showToast } from '../Toast';
 import { get, put, getUserMessage } from '../../api';
 import { getBranchId, setActiveBranchId } from '../../branch';
+import { useRealtimeReload, BRANCH_UPDATED_EVENT, REALTIME_EVENT } from '../../hooks/useRealtimeSync';
+import type { DomainEvent } from '../../hooks/useRealtimeSync';
 
 type Branch = {
   id: string;
@@ -25,9 +27,38 @@ export default function BranchesSettings() {
     fetchBranch();
   }, []);
 
-  const fetchBranch = async () => {
+  // Live-sync when Admin (or another client) updates this branch
+  useRealtimeReload([BRANCH_UPDATED_EVENT], () => {
+    void fetchBranch({ soft: true });
+  });
+
+  useEffect(() => {
+    const onRealtime = (ev: Event) => {
+      const detail = (ev as CustomEvent<DomainEvent>).detail;
+      if (detail?.type !== 'branch.updated') return;
+      const payload = detail.payload || {};
+      if (branch && payload.id && String(payload.id) !== branch.id) return;
+      if (payload.name != null) setName(String(payload.name));
+      if (payload.address != null) setAddress(String(payload.address));
+      if (payload.phone != null) setPhone(String(payload.phone));
+      setBranch((prev) =>
+        prev
+          ? {
+              ...prev,
+              name: payload.name != null ? String(payload.name) : prev.name,
+              address: payload.address != null ? String(payload.address) : prev.address,
+              phone: payload.phone != null ? String(payload.phone) : prev.phone,
+            }
+          : prev,
+      );
+    };
+    window.addEventListener(REALTIME_EVENT, onRealtime);
+    return () => window.removeEventListener(REALTIME_EVENT, onRealtime);
+  }, [branch?.id]);
+
+  const fetchBranch = async (opts?: { soft?: boolean }) => {
     try {
-      setLoading(true);
+      if (!opts?.soft) setLoading(true);
       const data = await get<Branch[]>('/branches/');
       const list = Array.isArray(data) ? data : [];
       const b = list[0] || null;
@@ -39,9 +70,9 @@ export default function BranchesSettings() {
         setActiveBranchId(b.id);
       }
     } catch (e) {
-      showToast(getUserMessage(e), 'error');
+      if (!opts?.soft) showToast(getUserMessage(e), 'error');
     } finally {
-      setLoading(false);
+      if (!opts?.soft) setLoading(false);
     }
   };
 
@@ -58,7 +89,7 @@ export default function BranchesSettings() {
         phone: phone.trim(),
       });
       showToast('Branch updated', 'success');
-      fetchBranch();
+      void fetchBranch({ soft: true });
     } catch (e) {
       showToast(getUserMessage(e), 'error');
     } finally {

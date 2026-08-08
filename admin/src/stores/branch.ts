@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { get as apiGet, post, patch } from '../api/client';
-import { errMsg } from './helpers';
+import { errMsg, notifyAction } from './helpers';
 
 export type Branch = {
   id: string;
@@ -69,18 +69,24 @@ export const useBranchFilter = create<BranchState>((set, getState) => ({
   },
 
   create: async (data) => {
-    const res = await post<Branch & { message?: string }>('/v1/admin/branches', data);
-    set({ message: res.message || 'Created' });
-    await getState().loadAll();
+    await notifyAction(async () => {
+      const res = await post<Branch & { message?: string }>('/v1/admin/branches', data);
+      set({ message: res.message || 'Created' });
+      await getState().loadAll();
+    }, 'Branch created', 'Could not create branch');
   },
 
   archive: async (id) => {
-    await patch(`/v1/admin/branches/${id}/archive`);
-    await getState().loadAll();
+    await notifyAction(async () => {
+      await patch(`/v1/admin/branches/${id}/archive`);
+      await getState().loadAll();
+    }, 'Branch archived', 'Could not archive branch');
   },
 
   unarchive: async (id) => {
-    await patch(`/v1/admin/branches/${id}/unarchive`);
-    await getState().loadAll();
+    await notifyAction(async () => {
+      await patch(`/v1/admin/branches/${id}/unarchive`);
+      await getState().loadAll();
+    }, 'Branch restored', 'Could not restore branch');
   },
 }));

@@ -15,6 +15,7 @@ import { get, put, getUserMessage } from '../api';
 import { showConfirm } from '../components/ConfirmDialog';
 import { getBranchId } from '../branch';
 import { useSettingsStore } from '../stores/settingsStore';
+import { SETTINGS_UPDATED_EVENT, useRealtimeReload } from '../hooks/useRealtimeSync';
 
 type SettingsResponse = { config?: Record<string, unknown> };
 
@@ -181,6 +182,11 @@ export default function Settings() {
       setTaxLoading(false);
     }
   };
+
+  useRealtimeReload([SETTINGS_UPDATED_EVENT], () => {
+    if (activeTab === 'taxrates') void fetchTaxSettings();
+    if (activeTab === 'discounts') void fetchDiscounts();
+  });
 
   const saveTaxSettings = async () => {
     setTaxSaving(true);

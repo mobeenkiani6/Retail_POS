@@ -72,6 +72,11 @@ def create_customer(current_user):
         customer.notes = data.get('notes', '')
     db.session.add(customer)
     db.session.commit()
+    try:
+        from app.services.event_bus import customer_updated
+        customer_updated(customer.id, action='created')
+    except Exception:
+        pass
     return jsonify({'customer': _customer_dict(customer)}), 201
 
 
@@ -92,6 +97,11 @@ def update_customer(current_user, customer_id):
     if hasattr(customer, 'notes') and 'notes' in data:
         customer.notes = data['notes']
     db.session.commit()
+    try:
+        from app.services.event_bus import customer_updated
+        customer_updated(customer.id, action='updated')
+    except Exception:
+        pass
     return jsonify({'customer': _customer_dict(customer)}), 200
 
 
@@ -103,6 +113,11 @@ def archive_customer(current_user, customer_id):
     if hasattr(customer, 'archived_at'):
         customer.archived_at = datetime.utcnow()
         db.session.commit()
+        try:
+            from app.services.event_bus import customer_updated
+            customer_updated(customer.id, action='archived')
+        except Exception:
+            pass
     return jsonify({'message': 'Customer archived'}), 200
 
 
@@ -114,6 +129,11 @@ def restore_customer(current_user, customer_id):
     if hasattr(customer, 'archived_at'):
         customer.archived_at = None
         db.session.commit()
+        try:
+            from app.services.event_bus import customer_updated
+            customer_updated(customer.id, action='restored')
+        except Exception:
+            pass
     return jsonify({'message': 'Customer restored'}), 200
 
 
@@ -124,4 +144,9 @@ def delete_customer(current_user, customer_id):
     customer = Customer.query.get_or_404(customer_id)
     db.session.delete(customer)
     db.session.commit()
+    try:
+        from app.services.event_bus import customer_updated
+        customer_updated(customer_id, action='deleted')
+    except Exception:
+        pass
     return jsonify({'message': 'Customer deleted'}), 200

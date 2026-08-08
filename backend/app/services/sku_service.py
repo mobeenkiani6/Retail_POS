@@ -1,8 +1,16 @@
-"""Product SKU helpers — retail pack-size model."""
+"""Product SKU helpers — retail pack-size model + automatic SKU generation."""
+from __future__ import annotations
+
 import random
+import re
 import string
 from decimal import Decimal
-from app.models import db, Product, ProductSku, Unit, Inventory
+
+from app.models import Product, ProductSku, Unit, Inventory
+
+
+_SKU_STRIP_RE = re.compile(r'[^A-Z0-9]+')
+_MULTI_HYPHEN_RE = re.compile(r'-{2,}')
 
 
 def format_sku_display(sku: ProductSku) -> str:
@@ -33,7 +41,7 @@ def sku_to_dict(sku: ProductSku, branch_id=None) -> dict:
         'id': sku.id,
         'product_id': sku.product_id,
         'sku_code': sku.sku_code,
-        'barcode': sku.barcode,
+        'barcode': sku.barcode or '',
         'variant_name': sku.variant_name,
         'quantity_value': float(sku.quantity_value or 1),
         'unit_id': sku.unit_id,
@@ -65,24 +73,125 @@ def generate_barcode(prefix='890') -> str:
     return f'{prefix}{random.randint(1000000000, 9999999999)}'
 
 
-def generate_sku_code(product_name: str, product_id: int | None = None) -> str:
-    """Generate SKU code from product name."""
-    base = ''.join(c.upper() for c in product_name if c.isalnum())[:6] or 'SKU'
-    pid = product_id or 0
-    for i in range(100):
-        code = f'{base}-{pid}-{i + 1:03d}' if pid else f'{base}-{i + 1:04d}'
-        exists = ProductSku.query.filter_by(sku_code=code).first()
-        if not exists:
+def normalize_sku_segment(text: str | None, max_len: int = 24) -> str:
+    """
+    Normalize a text segment for SKU codes.
+    Lay's Classic → LAYS-CLASSIC
+    30g → 30G
+    """
+    if not text:
+        return ''
+    s = str(text).upper().strip()
+    s = s.replace("'", '').replace('"', '')
+    s = _SKU_STRIP_RE.sub('-', s)
+    s = _MULTI_HYPHEN_RE.sub('-', s).strip('-')
+    if len(s) > max_len:
+        s = s[:max_len].rstrip('-')
+    return s
+
+
+def _size_segment(quantity_value=None, unit_abbr: str | None = None, variant_name: str | None = None) -> str:
+    """Build size segment like 30G / 250ML / 1KG from qty+unit, else from variant."""
+    unit = (unit_abbr or '').strip()
+    qty = None
+    try:
+        if quantity_value not in (None, ''):
+            qty = float(quantity_value)
+    except (TypeError, ValueError):
+        qty = None
+
+    if qty is not None and qty > 0:
+        qty_str = str(int(qty)) if qty == int(qty) else str(qty).rstrip('0').rstrip('.')
+        unit_seg = normalize_sku_segment(unit, max_len=8) if unit else ''
+        if unit_seg in ('EA', 'EACH', 'PC', 'PIECE', 'UNIT'):
+            unit_seg = ''
+        if unit_seg:
+            return f'{qty_str}{unit_seg}'
+        if qty != 1:
+            return qty_str
+
+    variant = (variant_name or '').strip()
+    if variant and variant.lower() not in ('default', 'standard', 'base'):
+        return normalize_sku_segment(variant, max_len=16)
+    return ''
+
+
+def build_sku_base(
+    product_name: str,
+    variant_name: str | None = None,
+    quantity_value=None,
+    unit_abbr: str | None = None,
+) -> str:
+    """Build meaningful base SKU e.g. LAYS-CLASSIC-30G (no uniqueness suffix yet)."""
+    name_seg = normalize_sku_segment(product_name, max_len=32) or 'SKU'
+    size_seg = _size_segment(quantity_value, unit_abbr, variant_name)
+    parts = [name_seg]
+    if size_seg and size_seg not in name_seg:
+        parts.append(size_seg)
+    base = '-'.join(p for p in parts if p)
+    base = _MULTI_HYPHEN_RE.sub('-', base).strip('-')
+    return base[:80] or 'SKU'
+
+
+def _sku_code_taken(code: str, exclude_sku_id: int | None = None) -> bool:
+    q = ProductSku.query.filter(ProductSku.sku_code == code)
+    if exclude_sku_id:
+        q = q.filter(ProductSku.id != exclude_sku_id)
+    if q.first():
+        return True
+    return Product.query.filter(Product.sku == code).first() is not None
+
+
+def generate_sku_code(
+    product_name: str,
+    product_id: int | None = None,
+    variant_name: str | None = None,
+    quantity_value=None,
+    unit_abbr: str | None = None,
+    exclude_sku_id: int | None = None,
+) -> str:
+    """
+    Generate a unique SKU from product name + size/variant.
+    Examples:
+      Lay's Classic 30g → LAYS-CLASSIC-30G
+      duplicate → LAYS-CLASSIC-30G-001
+    """
+    # product_id kept for API compatibility (unused in new algorithm)
+    _ = product_id
+    base = build_sku_base(product_name, variant_name, quantity_value, unit_abbr)
+    if not _sku_code_taken(base, exclude_sku_id):
+        return base
+
+    for i in range(1, 1000):
+        code = f'{base}-{i:03d}'
+        if not _sku_code_taken(code, exclude_sku_id):
             return code
+
     return f'{base}-{random.randint(1000, 9999)}'
 
 
 def parse_sku_payload(data: dict, product: Product | None = None) -> dict | None:
+    from app.services.barcode_service import normalize_barcode, validate_barcode
+
     variant_name = (data.get('variant_name') or data.get('name') or 'Standard').strip()
-    barcode = (data.get('barcode') or '').strip()
-    sku_code = (data.get('sku_code') or '').strip()
-    if not barcode:
+    raw_barcode = data.get('barcode')
+    if raw_barcode is None:
+        barcode = ''
+    else:
+        barcode = normalize_barcode(raw_barcode)
+
+    ok, barcode, err = validate_barcode(barcode)
+    if not ok:
+        raise ValueError(err or 'Invalid barcode format')
+
+    # Require at least barcode OR we still allow empty (nullable). Always need a payload row.
+    # Previously empty barcode returned None and skipped the row — keep a row when any
+    # identifying fields are present.
+    has_identity = bool(barcode) or bool((data.get('sku_code') or '').strip()) or bool(variant_name)
+    if not has_identity and not data.get('id'):
         return None
+
+    sku_code = (data.get('sku_code') or '').strip()
     try:
         qty = float(data.get('quantity_value', data.get('quantity', 1)) or 1)
     except (TypeError, ValueError):
@@ -114,10 +223,22 @@ def parse_sku_payload(data: dict, product: Product | None = None) -> dict | None
         tax_rate = None
     if tax_rate is None and product:
         tax_rate = float(product.tax_rate or 0)
+
+    if not sku_code:
+        pname = product.name if product else (data.get('product_name') or 'Product')
+        sku_code = generate_sku_code(
+            pname,
+            product.id if product else None,
+            variant_name=variant_name,
+            quantity_value=qty,
+            unit_abbr=unit_abbr,
+            exclude_sku_id=int(data['id']) if data.get('id') else None,
+        )
+
     return {
         'variant_name': variant_name,
-        'barcode': barcode,
-        'sku_code': sku_code or barcode,
+        'barcode': barcode or None,
+        'sku_code': sku_code,
         'quantity_value': qty,
         'unit_id': unit_id,
         'unit_abbr': unit_abbr,

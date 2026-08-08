@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { get as apiGet, put } from '../api/client';
 import { errMsg } from './helpers';
+import { showToast } from '../components/Toast';
 
 export type Discount = {
   id: string;
@@ -130,8 +131,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       await put('/v1/admin/settings/business', { config: next, branch_id: null });
       set({ config: next, saving: false, message: 'Saved' });
+      showToast('Settings saved', 'success');
     } catch (e) {
-      set({ saving: false, message: '', error: errMsg(e, 'Save failed') });
+      const msg = errMsg(e, 'Save failed');
+      set({ saving: false, message: '', error: msg });
+      showToast(msg, 'error');
     }
   },
 }));

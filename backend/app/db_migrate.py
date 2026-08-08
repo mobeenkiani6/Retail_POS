@@ -346,6 +346,9 @@ MIGRATIONS = [
     "ALTER TABLE gift_cards ADD COLUMN IF NOT EXISTS initial_balance NUMERIC(12,2)",
     "ALTER TABLE gift_cards ADD COLUMN IF NOT EXISTS customer_id INTEGER",
     "ALTER TABLE gift_cards ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ",
+    # Barcode / SKU management — nullable barcodes for unpackaged goods
+    "ALTER TABLE product_skus ALTER COLUMN barcode DROP NOT NULL",
+    "CREATE INDEX IF NOT EXISTS ix_product_skus_barcode ON product_skus (barcode) WHERE barcode IS NOT NULL",
 ]
 
 
@@ -534,6 +537,40 @@ def run_migrations(db):
             err = str(e).lower()
             if 'already exists' not in err and 'duplicate' not in err:
                 print(f'Migration note: {sql[:50]}... ({e})')
+
+    # Ensure unique sku_code values, then enforce unique index
+    try:
+        rows = db.session.execute(text(
+            "SELECT id, sku_code FROM product_skus ORDER BY id"
+        )).fetchall()
+        seen = {}
+        for sku_id, code in rows:
+            key = (code or '').strip()
+            if not key:
+                new_code = f'SKU-{sku_id}'
+                db.session.execute(
+                    text('UPDATE product_skus SET sku_code = :c WHERE id = :id'),
+                    {'c': new_code, 'id': sku_id},
+                )
+                seen[new_code] = sku_id
+                continue
+            if key in seen:
+                new_code = f'{key}-{sku_id}'
+                db.session.execute(
+                    text('UPDATE product_skus SET sku_code = :c WHERE id = :id'),
+                    {'c': new_code, 'id': sku_id},
+                )
+                seen[new_code] = sku_id
+            else:
+                seen[key] = sku_id
+        db.session.commit()
+        db.session.execute(text(
+            'CREATE UNIQUE INDEX IF NOT EXISTS ux_product_skus_sku_code ON product_skus (sku_code)'
+        ))
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f'SKU uniqueness migration note: {e}')
 
     # Seed default units if none exist
     try:

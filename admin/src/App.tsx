@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { useAuth } from './stores/auth';
 import { useTheme } from './stores/theme';
 import { AdminShell } from './layouts/AdminShell';
+import { ToastContainer } from './components/Toast';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { BranchesPage } from './pages/BranchesPage';
@@ -57,6 +58,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <ToastContainer />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route

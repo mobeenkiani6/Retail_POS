@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Plus, CheckCircle2 } from 'lucide-react';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import Modal from '../ui/Modal';
+import BarcodeField from './BarcodeField';
 import { get, post, getUserMessage } from '../../api';
 import { showToast } from '../Toast';
 import { emptySkuForm, type ProductSkuForm } from '../../utils/productSkus';
 import { unitDisplayLabel, unitStorageAbbr } from '../../utils/unitLabels';
+import type { ExistingBarcodeProduct } from '../../utils/barcode';
 
 type UnitOption = { id: number; name: string; abbreviation?: string };
 type VariantOption = { id: number; name: string; active?: boolean; archived_at?: string | null };
@@ -17,10 +19,10 @@ type Props = {
   units: UnitOption[];
   productName?: string;
   productId?: number;
-  /** Product-level selling unit applied to new variants */
   defaultUnitId?: string;
   defaultUnitAbbr?: string;
   isEditing?: boolean;
+  onExistingProduct?: (product: ExistingBarcodeProduct) => void;
 };
 
 const ADD_NEW_VALUE = '__add_new_variant__';
@@ -29,6 +31,7 @@ const CUSTOM_VALUE = '__custom_variant__';
 export default function SkuTable({
   skus, onChange, units, productName, productId,
   defaultUnitId = '', defaultUnitAbbr = 'pc', isEditing,
+  onExistingProduct,
 }: Props) {
   const [variantOptions, setVariantOptions] = useState<VariantOption[]>([]);
   const [addOpen, setAddOpen] = useState(false);
@@ -36,6 +39,9 @@ export default function SkuTable({
   const [newVariantName, setNewVariantName] = useState('');
   const [savingVariant, setSavingVariant] = useState(false);
   const [customIdx, setCustomIdx] = useState<number | null>(null);
+  const [skuStatus, setSkuStatus] = useState<Record<number, string>>({});
+  const skusRef = useRef(skus);
+  skusRef.current = skus;
 
   const loadVariants = () => {
     get<{ variant_options?: VariantOption[] }>('/v1/variant-options/')
@@ -46,19 +52,62 @@ export default function SkuTable({
   useEffect(() => { loadVariants(); }, []);
 
   const updateSku = (idx: number, patch: Partial<ProductSkuForm>) => {
-    onChange(skus.map((s, i) => i === idx ? { ...s, ...patch } : s));
+    onChange(skusRef.current.map((s, i) => i === idx ? { ...s, ...patch } : s));
   };
+
+  // Auto-generate SKU codes for new (unsaved) variants when name/size changes
+  useEffect(() => {
+    if (!productName?.trim()) return;
+    let cancelled = false;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+
+    skus.forEach((sku, idx) => {
+      // Keep existing SKU stable when editing saved rows
+      if (isEditing && sku.id) return;
+      const t = setTimeout(() => {
+        post<{ sku_code: string }>('/products/generate-sku-code', {
+          name: productName,
+          product_id: productId,
+          variant_name: sku.variant_name,
+          quantity_value: sku.quantity_value,
+          unit_abbr: sku.unit_abbr,
+          exclude_sku_id: sku.id,
+        })
+          .then(r => {
+            if (cancelled || !r?.sku_code) return;
+            const current = skusRef.current[idx];
+            if (!current || current.sku_code === r.sku_code) {
+              setSkuStatus(prev => ({ ...prev, [idx]: 'generated' }));
+              return;
+            }
+            setSkuStatus(prev => ({ ...prev, [idx]: 'generated' }));
+            onChange(skusRef.current.map((s, i) => (i === idx ? { ...s, sku_code: r.sku_code } : s)));
+          })
+          .catch(() => {});
+      }, 450 + idx * 40);
+      timers.push(t);
+    });
+
+    return () => {
+      cancelled = true;
+      timers.forEach(clearTimeout);
+    };
+    // Intentionally key off identity fields, not full skus array (avoid loops)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productName, productId, isEditing, skus.map(s => `${s.id}|${s.variant_name}|${s.quantity_value}|${s.unit_abbr}`).join(';')]);
 
   const ensureCodes = async (row: ProductSkuForm) => {
     try {
-      const [bc, code] = await Promise.all([
-        row.barcode ? Promise.resolve({ barcode: row.barcode }) : post<{ barcode: string }>('/products/generate-barcode', {}),
-        row.sku_code ? Promise.resolve({ sku_code: row.sku_code }) : post<{ sku_code: string }>('/products/generate-sku-code', {
-          name: productName || 'Product', product_id: productId,
-        }),
-      ]);
-      row.barcode = bc.barcode;
-      row.sku_code = code.sku_code;
+      if (!row.sku_code) {
+        const code = await post<{ sku_code: string }>('/products/generate-sku-code', {
+          name: productName || 'Product',
+          product_id: productId,
+          variant_name: row.variant_name,
+          quantity_value: row.quantity_value,
+          unit_abbr: row.unit_abbr,
+        });
+        row.sku_code = code.sku_code;
+      }
     } catch { /* user can fill later */ }
     return row;
   };
@@ -143,24 +192,28 @@ export default function SkuTable({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <label className="text-sm font-medium text-foreground">
-          Variants <span className="text-danger">*</span>
+          Variants / Pack sizes <span className="text-danger">*</span>
         </label>
       </div>
 
       {skus.length === 0 ? (
         <div className="text-center py-6 rounded-xl border border-dashed border-border text-muted text-sm">
-          No variants yet. Add at least one (e.g. Default, 1kg Pack).
+          No variants yet. Add at least one (e.g. Default, 30g Pack).
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-4">
           {skus.map((sku, idx) => {
             const currentName = sku.variant_name || '';
             const isCustom = customIdx === idx || (currentName && !variantNames.has(currentName) && currentName !== 'Default' && !variantOptions.some(v => v.name === currentName));
             const warn = marginWarn(sku);
             return (
-              <div key={sku.id != null ? `sku-${sku.id}` : `new-${idx}`} className="space-y-1">
+              <div
+                key={sku.id != null ? `sku-${sku.id}` : `new-${idx}`}
+                className="rounded-xl border border-border bg-canvas-subtle/40 p-3 sm:p-4 space-y-3"
+              >
                 <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
                   <div className="flex-1 min-w-0">
+                    <label className="text-xs text-muted mb-1 block">Size / Variant</label>
                     {isCustom ? (
                       <input
                         value={currentName}
@@ -187,6 +240,7 @@ export default function SkuTable({
                     )}
                   </div>
                   <div className="w-full sm:w-28">
+                    <label className="text-xs text-muted mb-1 block">Cost *</label>
                     <input
                       type="number"
                       min={0}
@@ -195,10 +249,11 @@ export default function SkuTable({
                       onChange={e => updateSku(idx, { cost_price: e.target.value })}
                       placeholder="Purchase"
                       className={`input-base w-full ${warn ? 'border-warning' : ''}`}
-                      title="Purchase price"
+                      title="Cost price"
                     />
                   </div>
                   <div className="w-full sm:w-28">
+                    <label className="text-xs text-muted mb-1 block">Selling *</label>
                     <input
                       type="number"
                       min={0}
@@ -207,13 +262,13 @@ export default function SkuTable({
                       onChange={e => updateSku(idx, { selling_price: e.target.value })}
                       placeholder="Sale"
                       className={`input-base w-full ${warn ? 'border-danger' : ''}`}
-                      title="Sale price"
+                      title="Selling price"
                     />
                   </div>
                   <button
                     type="button"
                     onClick={() => removeSku(idx)}
-                    className="px-3 py-2.5 rounded-xl border border-border text-sm text-muted hover:text-danger hover:border-danger/40 shrink-0"
+                    className="px-3 py-2.5 rounded-xl border border-border text-sm text-muted hover:text-danger hover:border-danger/40 shrink-0 sm:mt-5"
                   >
                     Remove
                   </button>
@@ -224,47 +279,75 @@ export default function SkuTable({
                   </p>
                 )}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <input
-                    type="number"
-                    min={0}
-                    step="any"
-                    value={sku.quantity_value}
-                    onChange={e => updateSku(idx, { quantity_value: e.target.value })}
-                    placeholder="Pack qty"
-                    className="input-base text-sm py-2"
-                    title="Pack quantity (e.g. 1 for 1kg pack)"
-                  />
-                  <select
-                    value={sku.unit_id}
-                    onChange={e => {
-                      const u = units.find(x => String(x.id) === e.target.value);
-                      updateSku(idx, {
-                        unit_id: e.target.value,
-                        unit_abbr: u ? unitStorageAbbr(u) : sku.unit_abbr,
-                      });
-                    }}
-                    className="input-base text-sm py-2"
-                  >
-                    <option value="">Unit</option>
-                    {units.map(u => (
-                      <option key={u.id} value={u.id}>{unitDisplayLabel(u.abbreviation, u.name)}</option>
-                    ))}
-                  </select>
-                  <input
-                    value={sku.barcode}
-                    onChange={e => updateSku(idx, { barcode: e.target.value })}
-                    placeholder="Barcode"
-                    className="input-base text-sm py-2 font-mono"
-                  />
-                  {!isEditing && (
+                  <div>
+                    <label className="text-xs text-muted mb-1 block">Pack qty</label>
                     <input
                       type="number"
                       min={0}
-                      value={sku.stock_level}
-                      onChange={e => updateSku(idx, { stock_level: e.target.value })}
-                      placeholder="Initial stock"
-                      className="input-base text-sm py-2"
+                      step="any"
+                      value={sku.quantity_value}
+                      onChange={e => updateSku(idx, { quantity_value: e.target.value })}
+                      placeholder="e.g. 30"
+                      className="input-base text-sm py-2 w-full"
                     />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted mb-1 block">Unit</label>
+                    <select
+                      value={sku.unit_id}
+                      onChange={e => {
+                        const u = units.find(x => String(x.id) === e.target.value);
+                        updateSku(idx, {
+                          unit_id: e.target.value,
+                          unit_abbr: u ? unitStorageAbbr(u) : sku.unit_abbr,
+                        });
+                      }}
+                      className="input-base text-sm py-2 w-full"
+                    >
+                      <option value="">Unit</option>
+                      {units.map(u => (
+                        <option key={u.id} value={u.id}>{unitDisplayLabel(u.abbreviation, u.name)}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {!isEditing && (
+                    <div className="col-span-2 sm:col-span-2">
+                      <label className="text-xs text-muted mb-1 block">Initial stock</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={sku.stock_level}
+                        onChange={e => updateSku(idx, { stock_level: e.target.value })}
+                        placeholder="Initial stock"
+                        className="input-base text-sm py-2 w-full"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <BarcodeField
+                  value={sku.barcode}
+                  onChange={bc => updateSku(idx, { barcode: bc })}
+                  excludeSkuId={sku.id}
+                  isEditing={Boolean(isEditing && sku.id)}
+                  onExistingProduct={onExistingProduct}
+                />
+
+                <div>
+                  <label className="text-xs text-muted mb-1 block">SKU (auto-generated)</label>
+                  <input
+                    value={sku.sku_code}
+                    readOnly
+                    className="input-base w-full font-mono text-sm bg-canvas-subtle cursor-not-allowed"
+                    title="SKU is generated automatically and cannot be edited"
+                  />
+                  {skuStatus[idx] === 'generated' && (
+                    <p className="text-[11px] text-success mt-1 inline-flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" /> SKU generated successfully
+                    </p>
+                  )}
+                  {isEditing && sku.id && (
+                    <p className="text-[11px] text-muted mt-1">SKU stays stable after creation.</p>
                   )}
                 </div>
               </div>
@@ -299,7 +382,7 @@ export default function SkuTable({
           label="Variant Name *"
           value={newVariantName}
           onChange={e => setNewVariantName(e.target.value)}
-          placeholder="e.g. 1kg Pack, Large, Bottle"
+          placeholder="e.g. 30g Pack, 1kg, Bottle"
           autoFocus
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveNewVariant(); } }}
         />

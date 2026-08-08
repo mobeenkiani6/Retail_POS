@@ -318,7 +318,9 @@ export function SettingsPage() {
           <div className="panel p-5 space-y-4">
             <div>
               <h2 className="text-base font-semibold">Receipt settings</h2>
-              <p className="text-xs text-muted mt-1">These settings sync with POS printed receipts via shared business config.</p>
+              <p className="text-xs text-muted mt-1">
+                Shared with POS — changes here show up in mart POS Receipt settings (and the other way around).
+              </p>
             </div>
             <div>
               <label className="section-label">Business name on receipt</label>

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { get as apiGet, post, put, del } from '../api/client';
-import { errMsg } from './helpers';
+import { errMsg, notifyAction } from './helpers';
 
 export type Coupon = {
   id: number;
@@ -63,44 +63,62 @@ export const useMarketingStore = create<MarketingState>((set, get) => ({
   },
 
   createCoupon: async (data) => {
-    await post('/v1/admin/marketing/coupons', data);
-    set({ message: 'Coupon created' });
-    await get().load();
+    await notifyAction(async () => {
+      await post('/v1/admin/marketing/coupons', data);
+      set({ message: 'Coupon created' });
+      await get().load();
+    }, 'Coupon created', 'Could not create coupon');
   },
   updateCoupon: async (id, data) => {
-    await put(`/v1/admin/marketing/coupons/${id}`, data);
-    await get().load();
+    await notifyAction(async () => {
+      await put(`/v1/admin/marketing/coupons/${id}`, data);
+      await get().load();
+    }, 'Coupon updated', 'Could not update coupon');
   },
   deleteCoupon: async (id) => {
-    await del(`/v1/admin/marketing/coupons/${id}`);
-    await get().load();
+    await notifyAction(async () => {
+      await del(`/v1/admin/marketing/coupons/${id}`);
+      await get().load();
+    }, 'Coupon deleted', 'Could not delete coupon');
   },
 
   createGiftCard: async (data) => {
-    await post('/v1/admin/marketing/gift-cards', data);
-    set({ message: 'Gift card issued' });
-    await get().load();
+    await notifyAction(async () => {
+      await post('/v1/admin/marketing/gift-cards', data);
+      set({ message: 'Gift card issued' });
+      await get().load();
+    }, 'Gift card issued', 'Could not issue gift card');
   },
   updateGiftCard: async (id, data) => {
-    await put(`/v1/admin/marketing/gift-cards/${id}`, data);
-    await get().load();
+    await notifyAction(async () => {
+      await put(`/v1/admin/marketing/gift-cards/${id}`, data);
+      await get().load();
+    }, 'Gift card updated', 'Could not update gift card');
   },
   deleteGiftCard: async (id) => {
-    await del(`/v1/admin/marketing/gift-cards/${id}`);
-    await get().load();
+    await notifyAction(async () => {
+      await del(`/v1/admin/marketing/gift-cards/${id}`);
+      await get().load();
+    }, 'Gift card deleted', 'Could not delete gift card');
   },
 
   createPromo: async (data) => {
-    await post('/v1/admin/marketing/promotions', data);
-    set({ message: 'Promotion created' });
-    await get().load();
+    await notifyAction(async () => {
+      await post('/v1/admin/marketing/promotions', data);
+      set({ message: 'Promotion created' });
+      await get().load();
+    }, 'Promotion created', 'Could not create promotion');
   },
   updatePromo: async (id, data) => {
-    await put(`/v1/admin/marketing/promotions/${id}`, data);
-    await get().load();
+    await notifyAction(async () => {
+      await put(`/v1/admin/marketing/promotions/${id}`, data);
+      await get().load();
+    }, 'Promotion updated', 'Could not update promotion');
   },
   deletePromo: async (id) => {
-    await del(`/v1/admin/marketing/promotions/${id}`);
-    await get().load();
+    await notifyAction(async () => {
+      await del(`/v1/admin/marketing/promotions/${id}`);
+      await get().load();
+    }, 'Promotion deleted', 'Could not delete promotion');
   },
 }));

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { get as apiGet, post, put, del } from '../api/client';
-import { errMsg } from './helpers';
+import { errMsg, notifyAction } from './helpers';
 
 export type Employee = {
   id: number;
@@ -46,20 +46,26 @@ export const useEmployeesStore = create<EmployeesState>((set, get) => ({
   },
 
   create: async (data) => {
-    await post('/users/', data);
-    set({ message: 'User created' });
-    await get().load();
+    await notifyAction(async () => {
+      await post('/users/', data);
+      set({ message: 'User created' });
+      await get().load();
+    }, 'Employee created', 'Could not create employee');
   },
 
   update: async (id, data) => {
-    await put(`/users/${id}`, data);
-    set({ message: 'User updated' });
-    await get().load();
+    await notifyAction(async () => {
+      await put(`/users/${id}`, data);
+      set({ message: 'User updated' });
+      await get().load();
+    }, 'Employee updated', 'Could not update employee');
   },
 
   remove: async (id) => {
-    await del(`/users/${id}`);
-    set({ message: 'User deleted' });
-    await get().load();
+    await notifyAction(async () => {
+      await del(`/users/${id}`);
+      set({ message: 'User deleted' });
+      await get().load();
+    }, 'Employee deleted', 'Could not delete employee');
   },
 }));

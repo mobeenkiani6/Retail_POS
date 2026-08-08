@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { get as apiGet, post } from '../api/client';
-import { errMsg } from './helpers';
+import { errMsg, notifyAction } from './helpers';
 
 export type Customer = {
   id: number;
@@ -58,7 +58,9 @@ export const useCustomersStore = create<CustomersState>((set, get) => ({
   },
 
   addNote: async (id, body) => {
-    await post(`/v1/admin/customers/${id}/notes`, { body });
-    await get().loadProfile(id);
+    await notifyAction(async () => {
+      await post(`/v1/admin/customers/${id}/notes`, { body });
+      await get().loadProfile(id);
+    }, 'Note added', 'Could not add note');
   },
 }));

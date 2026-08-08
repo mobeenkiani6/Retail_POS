@@ -11,6 +11,7 @@ import { useBranchFilter } from '../stores/branch';
 import { useNotificationsStore } from '../stores/notifications';
 import { CommandPalette } from '../components/CommandPalette';
 import { NotificationDrawer } from '../components/NotificationDrawer';
+import { useAdminRealtimeSync } from '../realtime/useAdminRealtimeSync';
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -39,6 +40,8 @@ export function AdminShell() {
   const [navOpen, setNavOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+
+  useAdminRealtimeSync(true);
 
   useEffect(() => {
     void load();
@@ -72,7 +75,7 @@ export function AdminShell() {
 
   const sidebar = (
     <>
-      <div className="px-5 py-5 border-b border-border flex items-start justify-between gap-2">
+      <div className="shrink-0 px-5 py-5 border-b border-border flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-lg font-bold tracking-tight">Nycto Retail</div>
           <div className="text-xs text-muted mt-0.5">Admin Panel</div>
@@ -86,7 +89,7 @@ export function AdminShell() {
           <X size={20} />
         </button>
       </div>
-      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5" aria-label="Main">
+      <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain py-3 px-2 space-y-0.5" aria-label="Main">
         {NAV.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
@@ -106,14 +109,14 @@ export function AdminShell() {
           </NavLink>
         ))}
       </nav>
-      <div className="p-3 border-t border-border text-xs text-muted truncate">
+      <div className="shrink-0 p-3 border-t border-border text-xs text-muted truncate">
         {user?.username} · {user?.role}
       </div>
     </>
   );
 
   return (
-    <div className="min-h-screen flex bg-canvas">
+    <div className="h-dvh max-h-dvh flex overflow-hidden bg-canvas">
       {/* Mobile backdrop */}
       {navOpen && (
         <button
@@ -124,21 +127,21 @@ export function AdminShell() {
         />
       )}
 
-      {/* Sidebar — drawer on mobile, static on md+ */}
+      {/* Sidebar — drawer on mobile; fixed-height column on md+ so only nav scrolls */}
       <aside
         className={`
-          fixed inset-y-0 left-0 z-50 w-[min(16.5rem,85vw)] flex flex-col
+          fixed inset-y-0 left-0 z-50 w-[min(16.5rem,85vw)] h-dvh flex flex-col overflow-hidden
           border-r border-border bg-surface shadow-soft
           transition-transform duration-200 ease-out
-          md:static md:z-auto md:w-60 md:shrink-0 md:translate-x-0 md:shadow-none
+          md:static md:z-auto md:w-60 md:shrink-0 md:h-full md:max-h-full md:translate-x-0 md:shadow-none
           ${navOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
         `}
       >
         {sidebar}
       </aside>
 
-      <div className="flex-1 flex flex-col min-w-0 w-full">
-        <header className="sticky top-0 z-30 h-14 border-b border-border bg-surface/90 backdrop-blur flex items-center gap-2 sm:gap-3 px-3 sm:px-5">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 w-full overflow-hidden">
+        <header className="shrink-0 z-30 h-14 border-b border-border bg-surface/90 backdrop-blur flex items-center gap-2 sm:gap-3 px-3 sm:px-5">
           <button
             type="button"
             className="md:hidden btn-ghost touch-target shrink-0"
@@ -205,7 +208,7 @@ export function AdminShell() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-auto p-4 sm:p-5 md:p-6">
+        <main className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-5 md:p-6">
           <Outlet />
         </main>
       </div>

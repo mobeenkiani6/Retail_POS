@@ -12,6 +12,12 @@ import Badge from '../components/ui/Badge';
 import { get, getUserMessage } from '../api';
 import { formatCurrency } from '../utils/formatCurrency';
 import { getBranchId } from '../branch';
+import {
+  CATALOG_UPDATED_EVENT,
+  INVENTORY_UPDATED_EVENT,
+  SALES_UPDATED_EVENT,
+  useRealtimeReload,
+} from '../hooks/useRealtimeSync';
 
 type DashboardData = {
   today_sales_count: number;
@@ -40,14 +46,25 @@ export default function OperationsDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => {
+  const load = (opts?: { soft?: boolean }) => {
     const branchId = getBranchId();
+    if (!opts?.soft) setLoading(true);
     get<DashboardData>(`/v1/dashboard/operations?branch_id=${branchId}`)
       .then(setData)
       .catch(e => setError(getUserMessage(e)))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!opts?.soft) setLoading(false);
+      });
+  };
+
+  useEffect(() => {
+    load();
   }, []);
 
+  useRealtimeReload(
+    [SALES_UPDATED_EVENT, INVENTORY_UPDATED_EVENT, CATALOG_UPDATED_EVENT],
+    () => load({ soft: true }),
+  );
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full text-muted gap-2">

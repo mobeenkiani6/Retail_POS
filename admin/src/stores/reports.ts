@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { get as apiGet, getToken, API_BASE } from '../api/client';
 import { useBranchFilter } from './branch';
 import { errMsg } from './helpers';
+import { showToast } from '../components/Toast';
 
 export type ReportPreview = {
   type: string;
@@ -169,8 +170,11 @@ export const useReportsStore = create<ReportsState>((set, get) => ({
       a.click();
       URL.revokeObjectURL(obj);
       set({ exporting: false });
+      showToast(`Exported ${type} report (${format.toUpperCase()})`, 'success');
     } catch (e) {
-      set({ exporting: false, error: errMsg(e) });
+      const msg = errMsg(e);
+      set({ exporting: false, error: msg });
+      showToast(msg, 'error');
     }
   },
 }));

@@ -93,7 +93,16 @@ def update_branch(current_user, branch_id):
     if 'phone' in data:
         branch.phone = (data.get('phone') or '').strip()
     db.session.commit()
-    event_bus.emit_domain_event('branch.updated', {'id': branch.id}, branch_id=branch.id)
+    event_bus.emit_domain_event(
+        'branch.updated',
+        {
+            'id': branch.id,
+            'name': branch.name,
+            'address': branch.address,
+            'phone': branch.phone,
+        },
+        branch_id=None,
+    )
     return jsonify(_branch_dict(branch)), 200
 
 

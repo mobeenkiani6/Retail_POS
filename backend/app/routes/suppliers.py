@@ -250,6 +250,11 @@ def create_supplier(current_user):
         supplier.outstanding_balance = float(data.get('outstanding_balance') or 0)
 
     db.session.commit()
+    try:
+        from app.services.event_bus import supplier_updated
+        supplier_updated(supplier.id, action='created')
+    except Exception:
+        pass
     return jsonify({'supplier': _supplier_dict(supplier, include_totals=True)}), 201
 
 
@@ -278,6 +283,11 @@ def update_supplier(current_user, supplier_id):
     supplier.updated_at = datetime.utcnow()
     ensure_supplier_code(supplier)
     db.session.commit()
+    try:
+        from app.services.event_bus import supplier_updated
+        supplier_updated(supplier.id, action='updated')
+    except Exception:
+        pass
     return jsonify({'supplier': _supplier_dict(supplier, include_totals=True)}), 200
 
 
@@ -462,7 +472,17 @@ def delete_supplier(current_user, supplier_id):
         supplier.archived_at = datetime.utcnow()
         supplier.status = 'inactive'
         db.session.commit()
+        try:
+            from app.services.event_bus import supplier_updated
+            supplier_updated(supplier.id, action='deleted')
+        except Exception:
+            pass
         return jsonify({'message': 'Supplier deleted'}), 200
     db.session.delete(supplier)
     db.session.commit()
+    try:
+        from app.services.event_bus import supplier_updated
+        supplier_updated(supplier_id, action='deleted')
+    except Exception:
+        pass
     return jsonify({'message': 'Supplier deleted'}), 200

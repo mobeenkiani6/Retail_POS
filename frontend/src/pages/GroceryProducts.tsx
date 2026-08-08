@@ -6,6 +6,7 @@ import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
 import SearchInput from '../components/ui/SearchInput';
 import ProductForm, { productToForm, formToPayload } from '../components/products/ProductForm';
+import ExistingProductModal from '../components/products/ExistingProductModal';
 import { get, post, put, patch, del, getUserMessage } from '../api';
 import { formatCurrency } from '../utils/formatCurrency';
 import { showToast } from '../components/Toast';
@@ -13,6 +14,8 @@ import { showConfirm } from '../components/ConfirmDialog';
 import { formatSkuLabel, priceRange, type ProductParent, type ProductSku } from '../utils/productSkus';
 import { getBranchId } from '../branch';
 import { useProductsStore } from '../stores/productsStore';
+import { validateBarcode, type ExistingBarcodeProduct } from '../utils/barcode';
+import { CATALOG_UPDATED_EVENT, useRealtimeReload } from '../hooks/useRealtimeSync';
 
 type CategoryOption = { id: number; name: string };
 type Option = { id: number; name: string; abbreviation?: string };
@@ -27,6 +30,8 @@ export default function GroceryProducts() {
   const [suppliers, setSuppliers] = useState<Option[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [existingHit, setExistingHit] = useState<ExistingBarcodeProduct | null>(null);
+  const [existingOpen, setExistingOpen] = useState(false);
 
   const search = useProductsStore(s => s.search);
   const setSearch = useProductsStore(s => s.setSearch);
@@ -65,11 +70,15 @@ export default function GroceryProducts() {
   };
 
   useEffect(() => { load(); }, [showArchived, branchId]);
+  useRealtimeReload([CATALOG_UPDATED_EVENT], () => load());
 
   const filtered = products.filter(p =>
     p.name.toLowerCase().includes(search.toLowerCase()) ||
     (p.brand || '').toLowerCase().includes(search.toLowerCase()) ||
-    (p.skus || []).some(s => s.barcode.includes(search) || s.sku_code.toLowerCase().includes(search.toLowerCase()))
+    (p.skus || []).some(s =>
+      (s.barcode || '').includes(search) ||
+      s.sku_code.toLowerCase().includes(search.toLowerCase())
+    )
   );
 
   const toggleExpand = (id: number) => {
@@ -78,6 +87,25 @@ export default function GroceryProducts() {
 
   const openEdit = (p: ProductParent) => {
     openEditStore(p.id, productToForm(p as unknown as Record<string, unknown>));
+  };
+
+  const handleExistingProduct = (product: ExistingBarcodeProduct) => {
+    setExistingHit(product);
+    setExistingOpen(true);
+  };
+
+  const viewExistingProduct = (productId: number) => {
+    setExistingOpen(false);
+    const p = products.find(x => x.id === productId);
+    if (p) {
+      openEdit(p);
+      return;
+    }
+    get<{ product: ProductParent }>(`/products/${productId}?branch_id=${branchId}`)
+      .then(res => {
+        if (res?.product) openEdit(res.product);
+      })
+      .catch(e => showToast(getUserMessage(e), 'error'));
   };
 
   const handleSave = async () => {
@@ -93,13 +121,44 @@ export default function GroceryProducts() {
       showToast('Add at least one variant', 'error');
       return;
     }
+    const seenBarcodes = new Set<string>();
     for (const sku of form.skus) {
       if (!sku.variant_name.trim()) {
         showToast('Each variant needs a name', 'error');
         return;
       }
-      if (!sku.barcode.trim()) {
-        showToast('Each variant needs a barcode', 'error');
+      const bc = validateBarcode(sku.barcode);
+      if (!bc.ok) {
+        showToast(bc.error || 'Invalid barcode format', 'error');
+        return;
+      }
+      if (bc.normalized) {
+        if (seenBarcodes.has(bc.normalized)) {
+          showToast(`Duplicate barcode in form: ${bc.normalized}`, 'error');
+          return;
+        }
+        seenBarcodes.add(bc.normalized);
+        // Live uniqueness check before save
+        try {
+          const check = await post<{ available: boolean; message?: string; existing?: ExistingBarcodeProduct }>(
+            '/products/check-barcode',
+            {
+              barcode: bc.normalized,
+              exclude_sku_id: sku.id,
+              branch_id: branchId,
+            },
+          );
+          if (check && check.available === false) {
+            if (check.existing) handleExistingProduct(check.existing);
+            showToast(check.message || 'Barcode already assigned to another product', 'error');
+            return;
+          }
+        } catch {
+          /* backend will re-validate on save */
+        }
+      }
+      if (!sku.sku_code.trim()) {
+        showToast('SKU is still generating — wait a moment and try again', 'error');
         return;
       }
       const cost = parseFloat(sku.cost_price) || 0;
@@ -192,7 +251,7 @@ export default function GroceryProducts() {
       <PageHeader
         title="Products"
         description="Retail catalog — parent products with pack-size SKUs"
-        actions={<Button onClick={openCreate}><Plus className="w-4 h-4" /> Add Product</Button>}
+        actions={<Button onClick={() => openCreate()}><Plus className="w-4 h-4" /> Add Product</Button>}
       />
 
       <div className="flex flex-wrap gap-3 mb-6">
@@ -299,7 +358,7 @@ export default function GroceryProducts() {
                             </div>
                             <div>
                               <p className="text-[10px] uppercase text-muted font-semibold">Barcode</p>
-                              <p className="font-mono text-xs">{sku.barcode}</p>
+                              <p className="font-mono text-xs">{sku.barcode || '—'}</p>
                             </div>
                             <div>
                               <p className="text-[10px] uppercase text-muted font-semibold">Purchase</p>
@@ -332,13 +391,13 @@ export default function GroceryProducts() {
       <Modal
         open={modalOpen}
         onClose={closeModal}
-        title={editingId ? 'Edit product' : 'Add product'}
+        title={editingId ? 'Edit Product' : 'Add New Product'}
         size="2xl"
         footer={
           <>
             <Button variant="secondary" onClick={closeModal}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving…' : editingId ? 'Save changes' : 'Add product'}
+              {saving ? 'Saving…' : editingId ? 'Save Changes' : 'Save Product'}
             </Button>
           </>
         }
@@ -352,8 +411,16 @@ export default function GroceryProducts() {
           suppliers={suppliers}
           isEditing={!!editingId}
           productId={editingId ?? undefined}
+          onExistingProduct={handleExistingProduct}
         />
       </Modal>
+
+      <ExistingProductModal
+        open={existingOpen}
+        product={existingHit}
+        onClose={() => setExistingOpen(false)}
+        onView={viewExistingProduct}
+      />
     </div>
   );
 }

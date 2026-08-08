@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { get as apiGet, post, put, del } from '../api/client';
-import { errMsg } from './helpers';
+import { errMsg, notifyAction } from './helpers';
 
 export type Supplier = {
   id: number;
@@ -81,20 +81,26 @@ export const useSuppliersStore = create<SuppliersState>((set, get) => ({
   },
 
   create: async (data) => {
-    await post('/v1/suppliers/', data as Record<string, unknown>);
-    set({ message: 'Supplier created' });
-    await get().load();
+    await notifyAction(async () => {
+      await post('/v1/suppliers/', data as Record<string, unknown>);
+      set({ message: 'Supplier created' });
+      await get().load();
+    }, 'Supplier created', 'Could not create supplier');
   },
 
   update: async (id, data) => {
-    await put(`/v1/suppliers/${id}`, data as Record<string, unknown>);
-    set({ message: 'Supplier updated' });
-    await get().load();
+    await notifyAction(async () => {
+      await put(`/v1/suppliers/${id}`, data as Record<string, unknown>);
+      set({ message: 'Supplier updated' });
+      await get().load();
+    }, 'Supplier updated', 'Could not update supplier');
   },
 
   remove: async (id) => {
-    await del(`/v1/suppliers/${id}`);
-    set({ message: 'Supplier deleted' });
-    await get().load();
+    await notifyAction(async () => {
+      await del(`/v1/suppliers/${id}`);
+      set({ message: 'Supplier deleted' });
+      await get().load();
+    }, 'Supplier deleted', 'Could not delete supplier');
   },
 }));

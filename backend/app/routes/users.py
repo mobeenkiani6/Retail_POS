@@ -56,6 +56,11 @@ def create_user(current_user):
         )
         db.session.add(new_user)
         db.session.commit()
+        try:
+            from app.services.event_bus import user_updated
+            user_updated(new_user.id, branch_id=new_user.branch_id, action='created')
+        except Exception:
+            pass
         return jsonify({
             "message": "User created successfully", 
             "user": {
@@ -103,6 +108,11 @@ def update_user(current_user, user_id):
             user.branch_id = resolve_branch_id(current_user, data.get('branch_id')) or user.branch_id
             
         db.session.commit()
+        try:
+            from app.services.event_bus import user_updated
+            user_updated(user.id, branch_id=user.branch_id, action='updated')
+        except Exception:
+            pass
         return jsonify({"message": "User updated successfully"}), 200
     except Exception as e:
         db.session.rollback()
@@ -120,6 +130,11 @@ def archive_user(current_user, user_id):
     try:
         user.archived_at = datetime.utcnow()
         db.session.commit()
+        try:
+            from app.services.event_bus import user_updated
+            user_updated(user.id, branch_id=user.branch_id, action='archived')
+        except Exception:
+            pass
         return jsonify({'message': 'User deleted', 'archived_at': user.archived_at.isoformat()}), 200
     except Exception as e:
         db.session.rollback()
@@ -135,6 +150,11 @@ def unarchive_user(current_user, user_id):
     try:
         user.archived_at = None
         db.session.commit()
+        try:
+            from app.services.event_bus import user_updated
+            user_updated(user.id, branch_id=user.branch_id, action='restored')
+        except Exception:
+            pass
         return jsonify({'message': 'User restored'}), 200
     except Exception as e:
         db.session.rollback()
@@ -167,9 +187,20 @@ def delete_user(current_user, user_id):
                 }), 409
             user.archived_at = datetime.utcnow()
             db.session.commit()
+            try:
+                from app.services.event_bus import user_updated
+                user_updated(user.id, branch_id=user.branch_id, action='deleted')
+            except Exception:
+                pass
             return jsonify({"message": "User deleted"}), 200
+        branch_id = user.branch_id
         db.session.delete(user)
         db.session.commit()
+        try:
+            from app.services.event_bus import user_updated
+            user_updated(user_id, branch_id=branch_id, action='deleted')
+        except Exception:
+            pass
         return jsonify({"message": "User deleted"}), 200
     except Exception as e:
         db.session.rollback()

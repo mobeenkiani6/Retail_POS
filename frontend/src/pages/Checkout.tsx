@@ -24,6 +24,12 @@ import {
   type HeldCart,
   type PaymentMethod,
 } from '../stores/checkoutStore';
+import {
+  CATALOG_UPDATED_EVENT,
+  INVENTORY_UPDATED_EVENT,
+  SETTINGS_UPDATED_EVENT,
+  useRealtimeReload,
+} from '../hooks/useRealtimeSync';
 
 type Product = {
   id: number; name: string; base_price?: number; cost_price?: number;
@@ -157,6 +163,10 @@ export default function Checkout() {
   }, [branchId, paymentMethod]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useRealtimeReload(
+    [CATALOG_UPDATED_EVENT, SETTINGS_UPDATED_EVENT, INVENTORY_UPDATED_EVENT],
+    () => { void fetchData(); },
+  );
 
   const addProductToCart = (item: {
     product_id: number; sku_id?: number; product_name: string; unit_price: number;
@@ -206,10 +216,13 @@ export default function Checkout() {
   };
 
   useEffect(() => {
-    if (lastScannedBarcode) {
-      scanAndAdd(lastScannedBarcode);
-      clearBarcode();
-    }
+    if (!lastScannedBarcode) return;
+    const code = lastScannedBarcode;
+    clearBarcode();
+    void (async () => {
+      await scanAndAdd(code);
+      setSearchQuery('');
+    })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastScannedBarcode]);
 
@@ -472,7 +485,18 @@ export default function Checkout() {
             ref={searchRef}
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && searchQuery) scanAndAdd(searchQuery); }}
+            onKeyDown={e => {
+              if (e.key !== 'Enter') return;
+              // USB scanner Enter is handled in capture phase by useScanner
+              if (e.defaultPrevented) return;
+              const raw = (e.currentTarget as HTMLInputElement).value.trim() || searchQuery.trim();
+              if (!raw) return;
+              e.preventDefault();
+              void (async () => {
+                await scanAndAdd(raw);
+                setSearchQuery('');
+              })();
+            }}
             placeholder="Scan barcode or search… (F1)"
             autoFocus
           />

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { get as apiGet, put, post } from '../api/client';
-import { errMsg } from './helpers';
+import { errMsg, notifyAction } from './helpers';
 
 type SecurityState = {
   history: Record<string, unknown>[];
@@ -52,13 +52,17 @@ export const useSecurityStore = create<SecurityState>((set, get) => ({
   },
 
   savePolicy: async () => {
-    const { policy, minLength } = get();
-    await put('/v1/admin/security/password-policy', { ...policy, min_length: Number(minLength) || 8 });
-    await get().load();
+    await notifyAction(async () => {
+      const { policy, minLength } = get();
+      await put('/v1/admin/security/password-policy', { ...policy, min_length: Number(minLength) || 8 });
+      await get().load();
+    }, 'Password policy saved', 'Could not save policy');
   },
 
   revokeSession: async (id) => {
-    await post(`/v1/admin/security/sessions/${id}/revoke`);
-    await get().load();
+    await notifyAction(async () => {
+      await post(`/v1/admin/security/sessions/${id}/revoke`);
+      await get().load();
+    }, 'Session revoked', 'Could not revoke session');
   },
 }));

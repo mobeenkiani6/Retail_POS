@@ -100,7 +100,8 @@ export const useProductsStore = create<ProductsState>((set, get) => ({
   load: async (force = false) => {
     const key = branchKey();
     if (!force && get().loadedBranchKey === key && get().products.length) return;
-    if (get().loading) return;
+    // Allow a forced reload even if a previous load is in-flight
+    if (!force && get().loading) return;
 
     set({ loading: true, error: null });
     const { selectedBranchId, queryParam } = useBranchFilter.getState();
