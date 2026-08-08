@@ -77,7 +77,7 @@ export default function BatchInventory() {
   };
 
   return (
-    <div className="flex-1 overflow-auto p-6 lg:p-8">
+    <div className="flex-1 overflow-auto p-3 sm:p-6 lg:p-8">
       <PageHeader
         title="Batch Inventory"
         description="Batch-level stock management with adjustments, transfers, and movement tracking"

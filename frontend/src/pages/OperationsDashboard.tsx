@@ -64,7 +64,7 @@ export default function OperationsDashboard() {
   const revenueTrend = hourlyData.filter(d => d.revenue > 0);
 
   return (
-    <div className="flex-1 overflow-auto p-6 lg:p-8">
+    <div className="flex-1 overflow-auto p-3 sm:p-6 lg:p-8">
       <PageHeader
         title="Operations Dashboard"
         description="Real-time store performance and inventory overview"

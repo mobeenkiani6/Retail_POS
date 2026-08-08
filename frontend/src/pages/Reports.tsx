@@ -50,7 +50,7 @@ export default function Reports() {
   ];
 
   return (
-    <div className="flex-1 overflow-auto p-6 lg:p-8">
+    <div className="flex-1 overflow-auto p-3 sm:p-6 lg:p-8">
       <PageHeader
         title="Reports"
         description="Sales, profit, inventory valuation, and performance analytics"

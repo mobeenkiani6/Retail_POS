@@ -210,8 +210,24 @@ export default function Settings() {
   };
 
   return (
-    <div className="flex h-full bg-surface rounded-xl shadow-soft border border-border overflow-hidden m-4 lg:m-6">
-      <div className="w-64 bg-canvas-subtle border-r border-border p-4 shrink-0 overflow-y-auto scroll-smooth">
+    <div className="flex flex-col md:flex-row h-full bg-surface rounded-xl shadow-soft border border-border overflow-hidden m-2 sm:m-4 lg:m-6">
+      {/* Mobile tab select */}
+      <div className="md:hidden border-b border-border p-3 bg-canvas-subtle shrink-0">
+        <label className="sr-only" htmlFor="settings-tab">Settings section</label>
+        <select
+          id="settings-tab"
+          value={activeTab}
+          onChange={e => setActiveTab(e.target.value)}
+          className="input-base w-full text-sm font-medium min-h-11"
+        >
+          {tabs.map(tab => {
+            const key = tab.toLowerCase().replace(/ & | /g, '');
+            return <option key={tab} value={key}>{tab}</option>;
+          })}
+        </select>
+      </div>
+
+      <div className="hidden md:block w-56 lg:w-64 bg-canvas-subtle border-r border-border p-4 shrink-0 overflow-y-auto scroll-smooth">
         <h2 className="text-lg font-bold text-foreground mb-6 px-2">Settings</h2>
         <nav className="space-y-0.5">
           {tabs.map(tab => {
@@ -219,8 +235,9 @@ export default function Settings() {
             return (
             <button
               key={tab}
+              type="button"
               onClick={() => setActiveTab(key)}
-              className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              className={`w-full text-left px-3 min-h-11 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                 activeTab === key ? 'bg-accent-600 text-white shadow-sm' : 'text-muted hover:bg-surface hover:text-foreground'
               }`}
             >
@@ -230,7 +247,7 @@ export default function Settings() {
         </nav>
       </div>
 
-      <div className="flex-1 p-6 lg:p-8 overflow-y-auto scroll-smooth bg-canvas">
+      <div className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto scroll-smooth bg-canvas min-w-0">
         
         {activeTab === 'general' && (
           <div className="max-w-2xl">

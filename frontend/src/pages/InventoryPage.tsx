@@ -487,7 +487,7 @@ export default function InventoryPage() {
             {alert.barcode ? ` · ${alert.barcode}` : ''}
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
           <Badge variant={isOut ? 'danger' : 'warning'}>
             {isOut ? 'Out' : `${alert.stock_level} left`}
           </Badge>
@@ -503,7 +503,7 @@ export default function InventoryPage() {
   };
 
   return (
-    <div className="flex-1 overflow-auto p-6 lg:p-8">
+    <div className="flex-1 overflow-auto p-3 sm:p-6 lg:p-8">
       <PageHeader
         title="Inventory"
         description="Stock levels, adjustments, and history"
@@ -537,9 +537,9 @@ export default function InventoryPage() {
         </div>
       )}
 
-      <div className="flex gap-1 mb-4 p-1 bg-canvas-subtle rounded-xl w-fit border border-border">
+      <div className="flex gap-1 mb-4 p-1 bg-canvas-subtle rounded-xl w-full sm:w-fit border border-border overflow-x-auto">
         {(['stock', 'history', 'alerts'] as const).map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors capitalize inline-flex items-center gap-2 ${tab === t ? 'bg-surface shadow-soft text-foreground' : 'text-muted hover:text-foreground'}`}>
+          <button key={t} type="button" onClick={() => setTab(t)} className={`shrink-0 min-h-10 px-4 py-2 rounded-lg text-sm font-medium transition-colors capitalize inline-flex items-center gap-2 ${tab === t ? 'bg-surface shadow-soft text-foreground' : 'text-muted hover:text-foreground'}`}>
             {t === 'stock' ? 'Stock' : t === 'history' ? 'History' : 'Alerts'}
             {t === 'alerts' && alertCount > 0 && (
               <span className="min-w-[1.25rem] h-5 px-1.5 rounded-md bg-warning text-white text-[10px] font-bold inline-flex items-center justify-center">

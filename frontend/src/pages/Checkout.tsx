@@ -5,7 +5,7 @@ import { useScanner } from '../hooks/useScanner';
 import {
   ShoppingBag, Plus, Minus, Trash2, Loader2, CreditCard, Banknote,
   Pause, Play, RotateCcw, Usb, User, Tag, Percent, StickyNote,
-  Eye, Keyboard, Star, AlertTriangle,
+  Eye, Keyboard, Star, AlertTriangle, X,
 } from 'lucide-react';
 import { formatCurrency } from '../utils/formatCurrency';
 import { get, post, getUserMessage } from '../api';
@@ -96,6 +96,21 @@ export default function Checkout() {
   const [qtyEditId, setQtyEditId] = useState<string | null>(null);
   const [qtyEditValue, setQtyEditValue] = useState('');
   const [skuPickerProduct, setSkuPickerProduct] = useState<Product | null>(null);
+  const [mobileCartOpen, setMobileCartOpen] = useState(false);
+
+  useEffect(() => {
+    if (!mobileCartOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobileCartOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [mobileCartOpen]);
 
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const branchId = getBranchId();
@@ -403,6 +418,7 @@ export default function Checkout() {
       }
       showToast(toastMsg, 'success');
       clearSale();
+      setMobileCartOpen(false);
     } catch (e) {
       showToast(getUserMessage(e), 'error');
     } finally {
@@ -430,21 +446,25 @@ export default function Checkout() {
   });
 
   return (
-    <div className="flex h-full bg-canvas">
-      {/* Product grid + cart */}
+    <div className="flex h-full bg-canvas relative">
+      {/* Product grid */}
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-        <div className="px-5 py-4 border-b border-border bg-surface">
-          <div className="flex items-center justify-between mb-3 gap-3">
-            <div className="flex items-center gap-3">
-              <h1 className="text-lg font-bold">Checkout</h1>
+        <div className="px-3 sm:px-5 py-3 sm:py-4 border-b border-border bg-surface">
+          <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <h1 className="text-base sm:text-lg font-bold truncate">Checkout</h1>
               {returnMode && <Badge variant="warning">Return Mode</Badge>}
             </div>
-            <div className="flex items-center gap-2">
-              <Badge variant={scannerStatus === 'active' ? 'success' : 'default'}>
+            <div className="flex items-center gap-2 shrink-0">
+              <Badge variant={scannerStatus === 'active' ? 'success' : 'default'} className="hidden sm:inline-flex">
                 <Usb className="w-3 h-3 mr-1 inline" />{scannerStatus}
               </Badge>
-              <button onClick={() => setReturnMode(!returnMode)} className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${returnMode ? 'border-warning bg-warning-soft text-warning' : 'border-border text-muted hover:text-foreground'}`}>
-                {returnMode ? 'Exit Return' : 'Return Mode'}
+              <button
+                type="button"
+                onClick={() => setReturnMode(!returnMode)}
+                className={`min-h-9 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${returnMode ? 'border-warning bg-warning-soft text-warning' : 'border-border text-muted hover:text-foreground'}`}
+              >
+                {returnMode ? 'Exit Return' : 'Return'}
               </button>
             </div>
           </div>
@@ -482,7 +502,7 @@ export default function Checkout() {
             <button
               type="button"
               onClick={() => setActiveCategory('all')}
-              className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+              className={`shrink-0 min-h-9 px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
                 activeCategory === 'all'
                   ? 'bg-accent-600 text-white border-accent-600'
                   : 'bg-surface border-border text-muted hover:border-accent-300 hover:text-foreground'
@@ -495,7 +515,7 @@ export default function Checkout() {
                 key={c.id}
                 type="button"
                 onClick={() => setActiveCategory(c.id)}
-                className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors truncate max-w-[140px] ${
+                className={`shrink-0 min-h-9 px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors truncate max-w-[140px] ${
                   activeCategory === c.id
                     ? 'bg-accent-600 text-white border-accent-600'
                     : 'bg-surface border-border text-muted hover:border-accent-300 hover:text-foreground'
@@ -506,7 +526,7 @@ export default function Checkout() {
             ))}
           </div>
 
-          <div className="flex gap-1.5 mt-2 overflow-x-auto">
+          <div className="hidden md:flex gap-1.5 mt-2 overflow-x-auto">
             {[
               { key: 'F2', label: 'Pay' }, { key: 'F3', label: 'Hold' },
               { key: 'F4', label: 'Customer' }, { key: 'F5', label: 'Discount' },
@@ -519,11 +539,11 @@ export default function Checkout() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-auto p-4">
+        <div className="flex-1 overflow-auto p-3 sm:p-4 pb-24 lg:pb-4">
           {loading ? (
             <div className="flex justify-center py-20 text-muted gap-2"><Loader2 className="w-5 h-5 animate-spin" /> Loading products…</div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-2.5">
               {filtered.map(p => {
                 const skus = getProductSkus(p);
                 const priceLabel = skus.length ? priceRange(skus, formatCurrency) : formatCurrency(p.base_price ?? 0);
@@ -533,10 +553,10 @@ export default function Checkout() {
                   key={p.id}
                   whileTap={{ scale: outOfStock ? 1 : 0.97 }}
                   onClick={() => addToCartFromProduct(p)}
-                  className={`p-3.5 rounded-xl bg-surface border text-left transition-all group ${
+                  className={`p-3 sm:p-3.5 rounded-xl bg-surface border text-left transition-all group min-h-[4.5rem] ${
                     outOfStock
                       ? 'border-border cursor-not-allowed'
-                      : 'border-border hover:border-accent-400 hover:shadow-soft'
+                      : 'border-border hover:border-accent-400 hover:shadow-soft active:border-accent-500'
                   }`}
                 >
                   <p className="font-medium text-sm truncate text-foreground group-hover:text-accent-600 dark:group-hover:text-accent-400 transition-colors">{p.name}</p>
@@ -554,10 +574,43 @@ export default function Checkout() {
         </div>
       </div>
 
-      {/* Cart panel */}
-      <div className="w-[400px] border-l border-border bg-surface flex flex-col shrink-0">
+      {/* Mobile cart open backdrop */}
+      {mobileCartOpen && (
+        <button
+          type="button"
+          className="lg:hidden fixed inset-0 z-40 bg-black/40"
+          aria-label="Close cart"
+          onClick={() => setMobileCartOpen(false)}
+        />
+      )}
+
+      {/* Cart panel — side on lg+, bottom sheet on smaller screens */}
+      <div
+        className={`
+          bg-surface flex flex-col shrink-0
+          fixed inset-x-0 bottom-0 z-50 max-h-[min(92dvh,100%)] rounded-t-2xl border-t border-border shadow-premium
+          transition-transform duration-200 ease-out
+          ${mobileCartOpen ? 'translate-y-0' : 'translate-y-full'}
+          lg:static lg:z-auto lg:translate-y-0 lg:max-h-none lg:h-full lg:rounded-none lg:border-t-0 lg:border-l lg:w-[360px] xl:w-[400px] lg:shadow-none
+        `}
+        role="complementary"
+        aria-label="Shopping cart"
+      >
+        <div className="lg:hidden flex items-center justify-between px-4 pt-3 pb-1 shrink-0">
+          <div className="w-10 h-1 rounded-full bg-border mx-auto absolute left-1/2 -translate-x-1/2 top-2.5 pointer-events-none" />
+          <p className="text-sm font-semibold">Cart</p>
+          <button
+            type="button"
+            onClick={() => setMobileCartOpen(false)}
+            className="touch-target p-2 -mr-1 rounded-lg hover:bg-canvas-subtle text-muted"
+            aria-label="Close cart"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
         {/* Cart header */}
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between shrink-0">
           <div>
             <h2 className="font-bold text-sm">Cart ({activeCart.length})</h2>
             {selectedCustomer && (
@@ -570,22 +623,23 @@ export default function Checkout() {
             )}
           </div>
           <div className="flex gap-0.5">
-            <button onClick={holdCart} title="Suspend (F3)" className="p-2 rounded-lg hover:bg-canvas-subtle text-muted"><Pause className="w-4 h-4" /></button>
-            <button onClick={openHeldModal} title="Resume" className="p-2 rounded-lg hover:bg-canvas-subtle text-muted"><Play className="w-4 h-4" /></button>
-            <button onClick={() => { setShowCustomerModal(true); }} title="Customer (F4)" className="p-2 rounded-lg hover:bg-canvas-subtle text-muted"><User className="w-4 h-4" /></button>
+            <button type="button" onClick={holdCart} title="Suspend (F3)" className="touch-target p-2 rounded-lg hover:bg-canvas-subtle text-muted"><Pause className="w-4 h-4" /></button>
+            <button type="button" onClick={openHeldModal} title="Resume" className="touch-target p-2 rounded-lg hover:bg-canvas-subtle text-muted"><Play className="w-4 h-4" /></button>
+            <button type="button" onClick={() => { setShowCustomerModal(true); }} title="Customer (F4)" className="touch-target p-2 rounded-lg hover:bg-canvas-subtle text-muted"><User className="w-4 h-4" /></button>
             <button
+              type="button"
               onClick={() => setShowDiscountModal(true)}
               title="Discount (F5)"
-              className={`p-2 rounded-lg hover:bg-canvas-subtle ${discount ? 'text-accent-600 bg-accent-500/10' : 'text-muted'}`}
+              className={`touch-target p-2 rounded-lg hover:bg-canvas-subtle ${discount ? 'text-accent-600 bg-accent-500/10' : 'text-muted'}`}
             >
               <Tag className="w-4 h-4" />
             </button>
-            <button onClick={async () => { if (await showConfirm({ title: 'Clear Cart', message: 'Remove all items?', variant: 'danger' })) clearSale(); }} title="Clear" className="p-2 rounded-lg hover:bg-canvas-subtle text-muted"><RotateCcw className="w-4 h-4" /></button>
+            <button type="button" onClick={async () => { if (await showConfirm({ title: 'Clear Cart', message: 'Remove all items?', variant: 'danger' })) clearSale(); }} title="Clear" className="touch-target p-2 rounded-lg hover:bg-canvas-subtle text-muted"><RotateCcw className="w-4 h-4" /></button>
           </div>
         </div>
 
         {/* Cart items */}
-        <div className="flex-1 overflow-auto p-3 space-y-2">
+        <div className="flex-1 overflow-auto p-3 space-y-2 min-h-0">
           {activeCart.length === 0 ? (
             <div className="text-center py-16 text-muted">
               <ShoppingBag className="w-10 h-10 mx-auto mb-2 opacity-30" />
@@ -660,7 +714,7 @@ export default function Checkout() {
                         <button
                           type="button"
                           onClick={() => setCart(c => c.filter(i => i.uniqueId !== item.uniqueId))}
-                          className="p-1 rounded text-muted hover:text-danger"
+                          className="touch-target p-2 rounded text-muted hover:text-danger"
                           title="Remove"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -671,7 +725,7 @@ export default function Checkout() {
                   {!item.voided && (
                     <div className="flex items-center justify-between mt-2">
                       <div className="flex items-center gap-1.5">
-                        <button onClick={() => updateQty(item.uniqueId, -1)} className="w-7 h-7 rounded-lg bg-surface border border-border flex items-center justify-center hover:bg-canvas-subtle"><Minus className="w-3 h-3" /></button>
+                        <button type="button" onClick={() => updateQty(item.uniqueId, -1)} className="w-10 h-10 rounded-lg bg-surface border border-border flex items-center justify-center hover:bg-canvas-subtle touch-target"><Minus className="w-3.5 h-3.5" /></button>
                         {qtyEditId === item.uniqueId ? (
                           <input
                             autoFocus
@@ -679,12 +733,12 @@ export default function Checkout() {
                             onChange={e => setQtyEditValue(e.target.value)}
                             onBlur={() => { setManualQty(item.uniqueId, parseInt(qtyEditValue, 10) || 1); setQtyEditId(null); }}
                             onKeyDown={e => { if (e.key === 'Enter') { setManualQty(item.uniqueId, parseInt(qtyEditValue, 10) || 1); setQtyEditId(null); } }}
-                            className="w-10 h-7 text-center text-sm font-bold rounded-lg border border-accent-500 bg-surface"
+                            className="w-12 h-10 text-center text-sm font-bold rounded-lg border border-accent-500 bg-surface"
                           />
                         ) : (
-                          <button onClick={() => { setQtyEditId(item.uniqueId); setQtyEditValue(String(item.quantity)); }} className="font-bold w-8 text-center text-sm hover:text-accent-600">{item.quantity}</button>
+                          <button type="button" onClick={() => { setQtyEditId(item.uniqueId); setQtyEditValue(String(item.quantity)); }} className="font-bold w-10 h-10 text-center text-sm hover:text-accent-600">{item.quantity}</button>
                         )}
-                        <button onClick={() => updateQty(item.uniqueId, 1)} className="w-7 h-7 rounded-lg bg-accent-600 text-white flex items-center justify-center hover:bg-accent-700"><Plus className="w-3 h-3" /></button>
+                        <button type="button" onClick={() => updateQty(item.uniqueId, 1)} className="w-10 h-10 rounded-lg bg-accent-600 text-white flex items-center justify-center hover:bg-accent-700 touch-target"><Plus className="w-3.5 h-3.5" /></button>
                       </div>
                       <div className="text-right">
                         {canOverridePrice && item.price !== item.original_price && (
@@ -701,22 +755,22 @@ export default function Checkout() {
         </div>
 
         {/* Notes */}
-        <div className="px-3 py-2 border-t border-border">
+        <div className="px-3 py-2 border-t border-border shrink-0">
           <div className="flex items-center gap-2">
             <StickyNote className="w-3.5 h-3.5 text-muted shrink-0" />
-            <input value={saleNotes} onChange={e => setSaleNotes(e.target.value)} placeholder="Sale notes…" className="flex-1 text-xs bg-transparent border-none outline-none text-foreground placeholder:text-muted" />
+            <input value={saleNotes} onChange={e => setSaleNotes(e.target.value)} placeholder="Sale notes…" className="flex-1 text-xs bg-transparent border-none outline-none text-foreground placeholder:text-muted min-h-9" />
           </div>
         </div>
 
         {/* Payment + totals */}
-        <div className="p-4 border-t border-border space-y-3 bg-canvas-subtle">
+        <div className="p-4 border-t border-border space-y-3 bg-canvas-subtle shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <div className="grid grid-cols-2 gap-1.5">
             {PAYMENT_METHODS.map(pm => {
               const icons: Record<string, typeof CreditCard> = { Cash: Banknote, Card: CreditCard };
               const Icon = icons[pm] || CreditCard;
               return (
-                <button key={pm} onClick={() => setPaymentMethod(pm)} className={`py-2 rounded-xl border text-[10px] font-bold flex flex-col items-center gap-0.5 transition-all ${paymentMethod === pm ? 'border-accent-600 bg-accent-600 text-white shadow-sm' : 'border-border text-muted hover:border-accent-300 bg-surface'}`}>
-                  <Icon className="w-3.5 h-3.5" />{pm}
+                <button key={pm} type="button" onClick={() => setPaymentMethod(pm)} className={`min-h-12 py-2.5 rounded-xl border text-xs font-bold flex flex-col items-center gap-0.5 transition-all ${paymentMethod === pm ? 'border-accent-600 bg-accent-600 text-white shadow-sm' : 'border-border text-muted hover:border-accent-300 bg-surface'}`}>
+                  <Icon className="w-4 h-4" />{pm}
                 </button>
               );
             })}
@@ -757,7 +811,7 @@ export default function Checkout() {
                   type="button"
                   disabled={maxLoyaltyRedeem <= 0}
                   onClick={() => setLoyaltyPointsToRedeem(maxLoyaltyRedeem)}
-                  className="shrink-0 px-3 py-2 rounded-xl border border-border text-xs font-semibold text-accent-600 hover:bg-accent-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="shrink-0 min-h-10 px-3 py-2 rounded-xl border border-border text-xs font-semibold text-accent-600 hover:bg-accent-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   Max ({maxLoyaltyRedeem})
                 </button>
@@ -811,14 +865,31 @@ export default function Checkout() {
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <Button variant="secondary" onClick={() => { setReceiptSnapshot(snapshotReceipt()); setShowReceipt(true); }} size="sm"><Eye className="w-3.5 h-3.5" /> Preview</Button>
-            <Button onClick={handleCheckout} disabled={!activeCart.length || checkingOut || cashInsufficient} size="sm">
+            <Button variant="secondary" onClick={() => { setReceiptSnapshot(snapshotReceipt()); setShowReceipt(true); }} size="md"><Eye className="w-3.5 h-3.5" /> Preview</Button>
+            <Button onClick={handleCheckout} disabled={!activeCart.length || checkingOut || cashInsufficient} size="md">
               {checkingOut ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingBag className="w-4 h-4" />}
-              Pay (F2)
+              Pay
             </Button>
           </div>
         </div>
       </div>
+
+      {/* Mobile cart bar */}
+      {!mobileCartOpen && (
+        <div className="lg:hidden fixed bottom-0 inset-x-0 z-30 p-3 pointer-events-none">
+          <button
+            type="button"
+            onClick={() => setMobileCartOpen(true)}
+            className="pointer-events-auto w-full min-h-14 flex items-center justify-between gap-3 px-4 py-3 rounded-2xl bg-accent-600 text-white shadow-premium font-semibold"
+          >
+            <span className="flex items-center gap-2">
+              <ShoppingBag className="w-5 h-5" />
+              Cart ({activeCart.length})
+            </span>
+            <span className="text-lg tabular-nums">{formatCurrency(total)}</span>
+          </button>
+        </div>
+      )}
 
       {/* SKU picker modal */}
       <Modal

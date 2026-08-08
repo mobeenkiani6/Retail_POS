@@ -581,7 +581,7 @@ export default function GRNPage() {
   );
 
   return (
-    <div className="flex-1 overflow-auto p-6 lg:p-8">
+    <div className="flex-1 overflow-auto p-3 sm:p-6 lg:p-8">
       <PageHeader
         title="Purchase Receiving"
         description="Receive supplier deliveries and add stock to inventory"

@@ -41,7 +41,7 @@ export default function Modal({ open, onClose, title, description, children, siz
   return createPortal(
     <AnimatePresence>
       {open && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-hidden">
+        <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-hidden">
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -54,7 +54,7 @@ export default function Modal({ open, onClose, title, description, children, siz
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ duration: 0.2 }}
-            className={`relative w-full ${sizeClass(size)} max-h-[min(90vh,880px)] flex flex-col bg-surface rounded-2xl shadow-premium border border-border overflow-hidden`}
+            className={`relative w-full ${sizeClass(size)} max-h-[min(92dvh,880px)] flex flex-col bg-surface rounded-t-2xl sm:rounded-2xl shadow-premium border border-border overflow-hidden`}
             onClick={e => e.stopPropagation()}
           >
             {(title || description) && (
